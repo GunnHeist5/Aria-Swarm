@@ -1,0 +1,31 @@
+[project]
+name = "aria-swarm"
+version = "0.1.0"
+description = "Autonomous multi-agent enterprise swarm built on LangGraph — a Darwinian economic organism."
+readme = "CLAUDE.md"
+requires-python = ">=3.11"
+
+# Pins are exact (==) on purpose: the swarm mutates its own genome at runtime,
+# so the execution substrate (orchestration + LLM + on-chain rails) must stay
+# deterministic across cron cycles, replication, and child-container deploys.
+# Bump these deliberately, never let them float.
+dependencies = [
+    # Orchestration — the graph that threads BusinessState through every node.
+    "langgraph==1.2.6",
+    "langchain-core==1.4.8",
+
+    # Hybrid-LLM backends (see get_llm_backend in graph.py):
+    #   claude-3-5-sonnet -> ChatAnthropic (Dev/Synthesizer + financial code)
+    #   hermes-3-*        -> ChatOpenAI over OpenRouter/Together/Akash
+    "langchain-anthropic==1.4.8",
+    "langchain-openai==1.3.3",
+
+    # On-chain rails — embedded programmatic EVM/Solana wallet, USDC over
+    # Base/Solana, gasless via Paymaster. The 2026 standardized toolkit for
+    # on-chain AI agents.
+    "coinbase-agentkit==0.7.4",
+]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
