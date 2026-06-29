@@ -29,6 +29,7 @@ from pathlib import Path
 logging.getLogger("langgraph.checkpoint.serde.jsonplus").setLevel(logging.ERROR)
 warnings.filterwarnings("ignore", message=r".*unregistered type.*")
 
+import bootstrap  # noqa: E402
 import capital  # noqa: E402
 import evolution  # noqa: E402
 import registry  # noqa: E402
@@ -157,6 +158,17 @@ def print_freeze_banner(hitl: dict) -> None:
 # ---------------------------------------------------------------------------
 
 
+def bootstrap_if_needed(state: dict) -> None:
+    """Run the first-run sovereignty daemon once, then persist the identity.
+
+    No-op after the first successful boot (``first_run_complete``).
+    """
+
+    if not state["first_run_complete"]:
+        bootstrap.run_bootstrap(state)
+        save_state(state)  # persist identity/env/creator before the first cycle
+
+
 def bootstrap_registry(state: dict) -> None:
     """Seed the Plasmid Registry baseline so the graph runs the evolved genome.
 
@@ -271,6 +283,7 @@ def run_cron() -> int:
     """One discrete tick: hydrate -> run one cycle -> persist -> exit."""
 
     working = load_state()
+    bootstrap_if_needed(working)
     bootstrap_registry(working)
     try:
         values, frozen = run_one_cycle(working)
@@ -292,6 +305,7 @@ def run_auto(max_cycles: int) -> int:
     """Autonomous loop until budget exhausted, freeze, or max cycles."""
 
     working = load_state()
+    bootstrap_if_needed(working)
     bootstrap_registry(working)
     completed = 0
     while completed < max_cycles:
@@ -326,6 +340,7 @@ def run_interactive(max_cycles: int) -> int:
     """Step through cycles, printing transitions and pausing for input."""
 
     working = load_state()
+    bootstrap_if_needed(working)
     bootstrap_registry(working)
     completed = 0
     while completed < max_cycles:
