@@ -29,6 +29,7 @@ from pathlib import Path
 logging.getLogger("langgraph.checkpoint.serde.jsonplus").setLevel(logging.ERROR)
 warnings.filterwarnings("ignore", message=r".*unregistered type.*")
 
+import capital  # noqa: E402
 import evolution  # noqa: E402
 import registry  # noqa: E402
 from graph import app  # noqa: E402 — import after the warning filter is installed
@@ -203,6 +204,32 @@ def _persist_and_exit_on_freeze(values: dict) -> int:
     return 2
 
 
+def handle_capital(values: dict) -> None:
+    """Run the capital-allocation rules on this cycle's newly booked revenue.
+
+    Distributes only the *new* revenue since the last allocation (tracked via
+    ``capital.distributed_revenue_usdc``) so accumulating ``revenue_generated_usdc``
+    is never double-counted. Prints a line on a phase transition or a payout.
+    """
+
+    cap = values["capital"]
+    fin = values["financials"]
+    prev_phase = cap["capital_phase"]
+    new_rev = max(0.0, fin["revenue_generated_usdc"] - cap["distributed_revenue_usdc"])
+
+    result = capital.apply_capital_allocation(values, new_revenue_usdc=new_rev)
+    cap["distributed_revenue_usdc"] = fin["revenue_generated_usdc"]
+
+    if result["phase"] != prev_phase:
+        print(f"[capital] phase: {prev_phase} -> {result['phase']}")
+    if result["creator_dividend"] > 0:
+        print(
+            f"[capital] {result['phase']}: revenue {result['revenue']:.2f} -> "
+            f"creator dividend {result['creator_dividend']:.2f} USDC, "
+            f"replication pool +{result['replication_earmark']:.2f}"
+        )
+
+
 def handle_lifecycle(values: dict) -> int | None:
     """Act on the cycle's metabolic_state. Returns a terminal exit code or None.
 
@@ -255,6 +282,7 @@ def run_cron() -> int:
     print_transition(values, working["cycle_count"])
     if frozen:
         return _persist_and_exit_on_freeze(values)
+    handle_capital(values)
     term = handle_lifecycle(values)
     save_state(values)
     return term if term is not None else 0
@@ -282,6 +310,7 @@ def run_auto(max_cycles: int) -> int:
         print_transition(values, working["cycle_count"])
         if frozen:
             return _persist_and_exit_on_freeze(values)
+        handle_capital(values)
         term = handle_lifecycle(values)  # extinction terminates; replication spawns
         if term is not None:
             save_state(values)
@@ -311,6 +340,7 @@ def run_interactive(max_cycles: int) -> int:
         print_transition(values, working["cycle_count"])
         if frozen:
             return _persist_and_exit_on_freeze(values)
+        handle_capital(values)
         term = handle_lifecycle(values)
         if term is not None:
             save_state(values)

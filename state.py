@@ -167,6 +167,8 @@ class CapitalState(TypedDict):
     creator_royalty_pct: float           # 0.0 in Phase 1; 0.30 in Phase 2+.
     operations_pct: float                # 1.0 in Phase 1; 0.70 in Phase 2+.
     replication_pool_usdc: float         # Capital earmarked to fund child swarms.
+    creator_dividends_paid_usdc: float   # Cumulative dividends streamed to the creator.
+    distributed_revenue_usdc: float      # Cumulative revenue already run through allocation.
 
     # Phase 3 — Sovereign Treasury mechanisms.
     defi_yield_allocation_usdc: float    # Reserve placed in decentralized yield/lending.
@@ -285,6 +287,33 @@ def evaluate_metabolic_state(financials: FinancialState) -> str:
     return "growth"
 
 
+# Capital-allocation phase gates (see CLAUDE.md "Capital Allocation Phases").
+SUSTAINED_GROWTH_RATIO = 1.2        # rolling 30-day ratio to leave Infancy
+SUSTAINED_GROWTH_TREASURY = 1_000.0  # min treasury (USDC) for Phase 2
+SOVEREIGN_TREASURY = 10_000.0        # wallet size that unlocks Phase 3
+
+
+def evaluate_capital_phase(financials: FinancialState) -> str:
+    """Classify the treasury's capital-allocation phase.
+
+    Gated by the rolling 30-day metabolic ratio + wallet size (highest first):
+      * ``sovereign_treasury`` — wallet above the sovereign threshold.
+      * ``sustained_growth``   — rolling ratio > 1.2 AND treasury > 1,000 USDC.
+      * ``infancy``            — otherwise (seed capital, or rolling ratio < 1.0).
+
+    Survival precedes extraction: a swarm only leaves Infancy (and begins paying
+    the creator dividend) once it is both sustainably profitable and cushioned.
+    """
+
+    wallet = financials["wallet_balance_usdc"]
+    rolling = financials["rolling_30d_metabolic_ratio"]
+    if wallet > SOVEREIGN_TREASURY:
+        return "sovereign_treasury"
+    if rolling > SUSTAINED_GROWTH_RATIO and wallet > SUSTAINED_GROWTH_TREASURY:
+        return "sustained_growth"
+    return "infancy"
+
+
 def new_business_state(
     *,
     swarm_id: str,
@@ -351,6 +380,8 @@ def new_business_state(
         "creator_royalty_pct": 0.0,
         "operations_pct": 1.0,
         "replication_pool_usdc": 0.0,
+        "creator_dividends_paid_usdc": 0.0,
+        "distributed_revenue_usdc": 0.0,
         "defi_yield_allocation_usdc": 0.0,
         "geo_failsafe_regions": [],
         "legal_wrapper_provisioned": False,

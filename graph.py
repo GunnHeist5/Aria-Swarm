@@ -49,6 +49,10 @@ logger = logging.getLogger(__name__)
 # Routing configuration
 # ---------------------------------------------------------------------------
 
+# Smoothing factor for the rolling 30-day metabolic ratio (EMA) that gates the
+# capital-allocation phases. ~30-window half-life.
+ROLLING_RATIO_ALPHA = 0.1
+
 # Cheap open-source target the router falls back to in Saving Mode.
 SAVING_MODE_MODEL = "hermes-3-70b"
 # Premium specialist for sensitive synthesis / financial code.
@@ -141,6 +145,13 @@ def metabolic_check_node(state: BusinessState) -> BusinessState:
     financials = state["financials"]
     ratio = compute_metabolic_ratio(financials)
     financials["metabolic_ratio"] = ratio
+
+    # Roll the smoothed 30-day ratio (EMA) that gates the capital phases. Seed it
+    # with the first real reading rather than decaying up from zero.
+    prev = financials["rolling_30d_metabolic_ratio"]
+    financials["rolling_30d_metabolic_ratio"] = round(
+        ROLLING_RATIO_ALPHA * ratio + (1 - ROLLING_RATIO_ALPHA) * prev, 6
+    ) if prev > 0 else ratio
 
     # Lifecycle label (extinction/replication/saving/growth) — drives the
     # lifecycle transitions in main.py and the extinction short-circuit below.
