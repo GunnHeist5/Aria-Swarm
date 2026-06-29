@@ -28,9 +28,12 @@ from __future__ import annotations
 import os
 from typing import Any
 
+from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import END, START, StateGraph
+from langgraph.types import Command, interrupt  # noqa: F401 — Command re-exported for resume.py
 
 from state import BusinessState, ICRStage, compute_metabolic_ratio
+from tools.hitl import dispatch_hitl_alert
 
 # ---------------------------------------------------------------------------
 # Routing configuration
@@ -197,32 +200,80 @@ def synthesizer_node(state: BusinessState) -> BusinessState:
 
 
 # ---------------------------------------------------------------------------
-# Graph topology
+# HITL circuit breaker
 # ---------------------------------------------------------------------------
 
 
-def build_graph():
-    """Construct and compile the swarm graph.
+def hitl_gate_node(state: BusinessState) -> BusinessState:
+    """Fail-closed circuit breaker run after every working node.
 
-    Deterministic path: START -> metabolic_check -> visionary -> realist ->
-    synthesizer -> END. The metabolic check runs first so every dialectical
-    cycle ideates under the correct (possibly downgraded) backend.
+    If a breach flag is set (``hitl_pending`` or ``requires_auth`` — raised e.g.
+    by ``tools.wallet`` on a spend-cap violation, or by a CAPTCHA/2FA wall), fire
+    the HITL alert and freeze the thread with a dynamic ``interrupt``. The
+    checkpointer persists the frozen state under the thread id; nothing
+    downstream runs until a human resumes via ``resume.py``.
+
+    On resume the flags have been cleared (by ``resume.py``'s ``update_state``),
+    so this node re-executes, skips the interrupt, and passes through — the alert
+    therefore fires exactly once per freeze.
     """
+
+    hitl = state["hitl"]
+    if hitl["hitl_pending"] or hitl["requires_auth"]:
+        payload = dispatch_hitl_alert(state)
+        # Freeze: blocks until a human resumes this thread (resume.py clears the
+        # breach flags and records the decision before signalling Command resume,
+        # so this gate re-runs flag-free and falls through — alert fires once).
+        interrupt(payload)
+    return state
+
+
+# ---------------------------------------------------------------------------
+# Graph topology
+# ---------------------------------------------------------------------------
+
+# Working node -> the HITL gate that guards it. The gate is the same function
+# registered under distinct names so a breach is caught immediately after ANY
+# node (i.e. after any tool call), then resumes into the next working node.
+_GATED_PATH = [
+    ("metabolic_check", metabolic_check_node, "gate_metabolic"),
+    ("visionary", visionary_node, "gate_visionary"),
+    ("realist", realist_node, "gate_realist"),
+    ("synthesizer", synthesizer_node, "gate_synthesizer"),
+]
+
+
+def build_graph(checkpointer=None):
+    """Construct and compile the swarm graph with HITL checkpointing.
+
+    Path (gates interleaved):
+      START -> metabolic_check -> gate_metabolic -> visionary -> gate_visionary
+            -> realist -> gate_realist -> synthesizer -> gate_synthesizer -> END
+
+    Compiled with a checkpointer (``MemorySaver`` by default) so every step's
+    full state is serialized and any interrupt can be resumed by thread id. Pass
+    a shared checkpointer (or a durable ``SqliteSaver``) to override.
+    """
+
+    if checkpointer is None:
+        checkpointer = MemorySaver()
 
     g = StateGraph(BusinessState)
 
-    g.add_node("metabolic_check", metabolic_check_node)
-    g.add_node("visionary", visionary_node)
-    g.add_node("realist", realist_node)
-    g.add_node("synthesizer", synthesizer_node)
+    for node_name, node_fn, gate_name in _GATED_PATH:
+        g.add_node(node_name, node_fn)
+        g.add_node(gate_name, hitl_gate_node)
 
     g.add_edge(START, "metabolic_check")
-    g.add_edge("metabolic_check", "visionary")
-    g.add_edge("visionary", "realist")
-    g.add_edge("realist", "synthesizer")
-    g.add_edge("synthesizer", END)
+    for i, (node_name, _, gate_name) in enumerate(_GATED_PATH):
+        g.add_edge(node_name, gate_name)  # node -> its gate
+        # gate -> next working node, or END after the last gate.
+        if i + 1 < len(_GATED_PATH):
+            g.add_edge(gate_name, _GATED_PATH[i + 1][0])
+        else:
+            g.add_edge(gate_name, END)
 
-    return g.compile()
+    return g.compile(checkpointer=checkpointer)
 
 
 # Compiled application graph (LangGraph convention: a module-level handle).
@@ -230,13 +281,15 @@ app = build_graph()
 
 
 if __name__ == "__main__":
-    # Smoke test: run one full cycle on a fresh genesis state. With zero
-    # revenue the metabolic router should drop to Hermes and Saving Mode, and
-    # the dialectic should advance all the way to COMPLETE.
+    # Smoke test: run one full cycle on a fresh genesis state. A checkpointed
+    # graph requires a thread id. With zero revenue the metabolic router should
+    # drop to Hermes/Saving Mode and the dialectic should reach COMPLETE (no
+    # breach flags set, so every HITL gate passes straight through).
     from state import new_business_state
 
     genesis = new_business_state(swarm_id="genesis", creator_audit_key="0x0")
-    result = app.invoke(genesis)
+    config = {"configurable": {"thread_id": "smoke"}}
+    result = app.invoke(genesis, config)
 
     print("active_model      :", result["llm"]["active_model"])
     print("saving_mode_active:", result["llm"]["saving_mode_active"])
