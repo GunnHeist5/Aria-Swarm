@@ -32,6 +32,7 @@ from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import END, START, StateGraph
 from langgraph.types import Command, interrupt  # noqa: F401 — Command re-exported for resume.py
 
+from prompts import render_agent_prompt
 from state import BusinessState, ICRStage, compute_metabolic_ratio
 from tools.hitl import dispatch_hitl_alert
 
@@ -144,6 +145,82 @@ def metabolic_check_node(state: BusinessState) -> BusinessState:
     return state
 
 
+def _agent_context(state: BusinessState) -> dict:
+    """Build the dynamic injection context for an `agents/*.md` template.
+
+    One comprehensive dict covering every injection variable used by any persona
+    template — extra keys are harmless to ``str.format``. ``debate_transcript``
+    is flattened to text; ``active_blueprint`` gets a cold-start placeholder.
+    """
+
+    fin = state["financials"]
+    dialectic = state["dialectic"]
+    return {
+        "metabolic_ratio": fin["metabolic_ratio"],
+        "active_model": state["llm"]["active_model"],
+        "capital_phase": state["capital"]["capital_phase"],
+        "wallet_balance_usdc": fin["wallet_balance_usdc"],
+        "active_blueprint": state.get("active_blueprint") or "(none — cold start)",
+        "visionary_output": dialectic["visionary_output"] or "",
+        "realist_critique": dialectic["realist_critique"] or "",
+        "debate_transcript": "\n".join(dialectic["debate_transcript"]) or "(empty)",
+    }
+
+
+def _content(response: Any) -> str:
+    """Coerce an ``llm.invoke`` return (``AIMessage``) to a plain string."""
+
+    content = getattr(response, "content", response)
+    return content if isinstance(content, str) else str(content)
+
+
+def _freeze_missing_prompt(state: BusinessState, agent_name: str, exc: Exception) -> None:
+    """Fail-closed: flag a missing/unsafe prompt so the next gate freezes.
+
+    Records the explicit loader error and raises the HITL flags WITHOUT writing
+    any output or advancing the dialectic — preventing an unformatted/generic
+    run. The following ``hitl_gate_node`` sees the flags and interrupts.
+    """
+
+    hitl = state["hitl"]
+    hitl["requires_auth"] = True
+    hitl["hitl_pending"] = True
+    hitl["hitl_reason"] = f"missing_prompt:{agent_name}"
+    state["error_log"].append(f"PROMPT_LOAD_FAILED: {exc}")
+
+
+def _run_agent(
+    state: BusinessState,
+    agent_name: str,
+    model: str,
+    output_key: str,
+    label: str,
+    next_stage: ICRStage,
+) -> BusinessState:
+    """Render the agent's prompt, invoke its LLM, and record the turn.
+
+    Fail-closed: if the template is missing/renamed (``FileNotFoundError``) or
+    the name escapes the genome dir (``ValueError``), freeze via HITL instead of
+    running on an unformatted prompt — the dialectic stage is left unadvanced.
+    """
+
+    ctx = _agent_context(state)
+    try:
+        prompt = render_agent_prompt(agent_name, ctx)
+    except (FileNotFoundError, ValueError) as exc:
+        _freeze_missing_prompt(state, agent_name, exc)
+        return state
+
+    llm = get_llm_backend(model)
+    output = _content(llm.invoke(prompt))
+
+    dialectic = state["dialectic"]
+    dialectic[output_key] = output
+    dialectic["debate_transcript"].append(f"{label}: {output}")
+    dialectic["icr_stage"] = next_stage
+    return state
+
+
 def visionary_node(state: BusinessState) -> BusinessState:
     """The Visionary (Catalyst) — maximal-scale, uncensored ideation.
 
@@ -151,15 +228,10 @@ def visionary_node(state: BusinessState) -> BusinessState:
     rules: the Visionary always runs on the uncensored open-source fleet.
     """
 
-    llm = get_llm_backend(SAVING_MODE_MODEL)  # noqa: F841 — wired for TODO(prompt)
-    # TODO(prompt): invoke llm with agents/visionary.md against active_blueprint.
-    output = "[visionary stub] maximal-scale concept pending live LLM call"
-
-    dialectic = state["dialectic"]
-    dialectic["visionary_output"] = output
-    dialectic["debate_transcript"].append(f"VISIONARY: {output}")
-    dialectic["icr_stage"] = ICRStage.CRITIQUE
-    return state
+    return _run_agent(
+        state, "visionary", SAVING_MODE_MODEL,
+        "visionary_output", "VISIONARY", ICRStage.CRITIQUE,
+    )
 
 
 def realist_node(state: BusinessState) -> BusinessState:
@@ -169,15 +241,10 @@ def realist_node(state: BusinessState) -> BusinessState:
     so the critique cost tracks the swarm's metabolic state.
     """
 
-    llm = get_llm_backend(state["llm"]["active_model"])  # noqa: F841 — TODO(prompt)
-    # TODO(prompt): invoke llm with agents/realist.md against visionary_output.
-    critique = "[realist stub] bottlenecks/API limits/failure vectors pending"
-
-    dialectic = state["dialectic"]
-    dialectic["realist_critique"] = critique
-    dialectic["debate_transcript"].append(f"REALIST: {critique}")
-    dialectic["icr_stage"] = ICRStage.REVISION
-    return state
+    return _run_agent(
+        state, "realist", state["llm"]["active_model"],
+        "realist_critique", "REALIST", ICRStage.REVISION,
+    )
 
 
 def synthesizer_node(state: BusinessState) -> BusinessState:
@@ -188,15 +255,10 @@ def synthesizer_node(state: BusinessState) -> BusinessState:
     premium backend.
     """
 
-    llm = get_llm_backend(SPECIALIST_MODEL)  # noqa: F841 — wired for TODO(prompt)
-    # TODO(prompt): invoke llm with agents/synthesizer.md against the transcript.
-    blueprint = "[synthesizer stub] patched, concrete blueprint pending"
-
-    dialectic = state["dialectic"]
-    dialectic["synthesized_blueprint"] = blueprint
-    dialectic["debate_transcript"].append(f"SYNTHESIZER: {blueprint}")
-    dialectic["icr_stage"] = ICRStage.COMPLETE
-    return state
+    return _run_agent(
+        state, "synthesizer", SPECIALIST_MODEL,
+        "synthesized_blueprint", "SYNTHESIZER", ICRStage.COMPLETE,
+    )
 
 
 # ---------------------------------------------------------------------------
