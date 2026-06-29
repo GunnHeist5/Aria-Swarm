@@ -181,7 +181,8 @@ class HITLState(TypedDict):
     """
 
     hitl_pending: bool                   # True while awaiting human verification.
-    hitl_reason: Optional[str]           # e.g. "captcha", "2fa", "bank_verification".
+    requires_auth: bool                  # Wallet/CRITICAL_GATE breach flag — halts autonomy.
+    hitl_reason: Optional[str]           # e.g. "captcha", "2fa", "wallet_spend_cap".
     hitl_webhook_url: Optional[str]      # Remote-view tracking URL last broadcast.
     pending_critical_gate_tool: Optional[str]  # CRITICAL_GATE tool awaiting HITL approval.
     resume_signature: Optional[str]      # Signed token proving authorized resume.
@@ -329,6 +330,7 @@ def new_business_state(
 
     hitl: HITLState = {
         "hitl_pending": False,
+        "requires_auth": False,
         "hitl_reason": None,
         "hitl_webhook_url": None,
         "pending_critical_gate_tool": None,
