@@ -1,0 +1,14 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+env/
+
+# Local state / secrets (the swarm wallet lives in ~/.automaton, but guard against strays)
+*.sqlite
+*.sqlite3
+wallet.json
+.env
+.env.*
