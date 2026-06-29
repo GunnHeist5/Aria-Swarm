@@ -29,6 +29,7 @@ from pathlib import Path
 logging.getLogger("langgraph.checkpoint.serde.jsonplus").setLevel(logging.ERROR)
 warnings.filterwarnings("ignore", message=r".*unregistered type.*")
 
+import registry  # noqa: E402
 from graph import app  # noqa: E402 — import after the warning filter is installed
 from state import new_business_state  # noqa: E402
 
@@ -154,6 +155,23 @@ def print_freeze_banner(hitl: dict) -> None:
 # ---------------------------------------------------------------------------
 
 
+def bootstrap_registry(state: dict) -> None:
+    """Seed the Plasmid Registry baseline so the graph runs the evolved genome.
+
+    Idempotent (hash dedupe): guarantees each role's `agents/*.md` baseline is in
+    the registry, so the dialectic nodes resolve prompts registry-first (and pick
+    up any sandbox-promoted champions) rather than always falling back to file.
+    Non-fatal on failure — the graph's file fallback still runs.
+    """
+
+    swarm_id = state["evolution"]["swarm_id"]
+    try:
+        registry.seed_genesis_genome(swarm_id, registry.DB_PATH)
+        print(f"[boot] registry genome seeded for {swarm_id}")
+    except Exception as exc:  # registry optional — file fallback keeps us running
+        print(f"[boot] WARNING: registry bootstrap failed ({exc}); using file genome.")
+
+
 def _persist_and_exit_on_freeze(values: dict) -> int:
     """Shared freeze handling: banner + persist + non-zero code."""
 
@@ -166,6 +184,7 @@ def run_cron() -> int:
     """One discrete tick: hydrate -> run one cycle -> persist -> exit."""
 
     working = load_state()
+    bootstrap_registry(working)
     try:
         values, frozen = run_one_cycle(working)
     except Exception as exc:  # never lose state on a cycle error
@@ -184,6 +203,7 @@ def run_auto(max_cycles: int) -> int:
     """Autonomous loop until budget exhausted, freeze, or max cycles."""
 
     working = load_state()
+    bootstrap_registry(working)
     completed = 0
     while completed < max_cycles:
         budget = working["financials"]["auto_mode_budget_usd"]
@@ -212,6 +232,7 @@ def run_interactive(max_cycles: int) -> int:
     """Step through cycles, printing transitions and pausing for input."""
 
     working = load_state()
+    bootstrap_registry(working)
     completed = 0
     while completed < max_cycles:
         try:

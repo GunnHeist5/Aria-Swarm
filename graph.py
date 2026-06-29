@@ -32,6 +32,7 @@ from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import END, START, StateGraph
 from langgraph.types import Command, interrupt  # noqa: F401 — Command re-exported for resume.py
 
+import registry
 from prompts import render_agent_prompt
 from state import BusinessState, ICRStage, compute_metabolic_ratio
 from tools.hitl import dispatch_hitl_alert
@@ -174,19 +175,62 @@ def _content(response: Any) -> str:
     return content if isinstance(content, str) else str(content)
 
 
-def _freeze_missing_prompt(state: BusinessState, agent_name: str, exc: Exception) -> None:
-    """Fail-closed: flag a missing/unsafe prompt so the next gate freezes.
+class PromptResolutionError(Exception):
+    """A role's prompt could not be resolved into a runnable, formatted string."""
 
-    Records the explicit loader error and raises the HITL flags WITHOUT writing
-    any output or advancing the dialectic — preventing an unformatted/generic
-    run. The following ``hitl_gate_node`` sees the flags and interrupts.
+    def __init__(self, reason: str, original: Exception | None = None):
+        super().__init__(reason)
+        self.reason = reason
+        self.original = original
+
+
+def _resolve_prompt(role: str, ctx: dict, swarm_id: str | None) -> str:
+    """Resolve a role's prompt, registry-first with the genome file as fallback.
+
+    The production genome lives in the Plasmid Registry: the highest-fitness,
+    production-cleared gene per role (promoted by the sandbox). We run that when
+    present, falling back to the baseline ``agents/<role>.md`` file otherwise.
+
+    Fail-closed: a registry gene whose ``{placeholders}`` are broken (a bad
+    mutation) raises rather than running unformatted; a missing file likewise.
+    Registry *unavailability* (not a bad gene) is non-fatal — we fall back to the
+    file so a transient DB issue never halts the swarm.
+    """
+
+    text = None
+    if swarm_id:
+        try:
+            # Pass DB_PATH explicitly (resolved now) so it's runtime-overridable.
+            text = registry.get_active_genome(swarm_id, registry.DB_PATH).get(role)
+        except Exception as exc:  # registry down -> fall back to file, don't halt
+            logger.warning("registry unavailable for %s, using file: %s", role, exc)
+            text = None
+
+    if text is not None:
+        try:
+            return text.format(**ctx)
+        except (KeyError, IndexError, ValueError) as exc:
+            raise PromptResolutionError(f"malformed_genome:{role}", exc)
+
+    try:
+        return render_agent_prompt(role, ctx)
+    except (FileNotFoundError, ValueError) as exc:
+        raise PromptResolutionError(f"missing_prompt:{role}", exc)
+
+
+def _freeze_prompt(state: BusinessState, reason: str, exc: Exception) -> None:
+    """Fail-closed: flag an unresolvable prompt so the next gate freezes.
+
+    Records the explicit error and raises the HITL flags WITHOUT writing any
+    output or advancing the dialectic — preventing an unformatted/generic run.
+    The following ``hitl_gate_node`` sees the flags and interrupts.
     """
 
     hitl = state["hitl"]
     hitl["requires_auth"] = True
     hitl["hitl_pending"] = True
-    hitl["hitl_reason"] = f"missing_prompt:{agent_name}"
-    state["error_log"].append(f"PROMPT_LOAD_FAILED: {exc}")
+    hitl["hitl_reason"] = reason
+    state["error_log"].append(f"PROMPT_LOAD_FAILED: {reason}: {exc}")
 
 
 def _run_agent(
@@ -197,18 +241,19 @@ def _run_agent(
     label: str,
     next_stage: ICRStage,
 ) -> BusinessState:
-    """Render the agent's prompt, invoke its LLM, and record the turn.
+    """Resolve the agent's prompt, invoke its LLM, and record the turn.
 
-    Fail-closed: if the template is missing/renamed (``FileNotFoundError``) or
-    the name escapes the genome dir (``ValueError``), freeze via HITL instead of
-    running on an unformatted prompt — the dialectic stage is left unadvanced.
+    The prompt is resolved registry-first (the evolved production genome) with
+    the ``agents/<role>.md`` file as fallback. Fail-closed: an unresolvable or
+    malformed prompt freezes via HITL instead of running on an unformatted
+    prompt — the dialectic stage is left unadvanced.
     """
 
     ctx = _agent_context(state)
     try:
-        prompt = render_agent_prompt(agent_name, ctx)
-    except (FileNotFoundError, ValueError) as exc:
-        _freeze_missing_prompt(state, agent_name, exc)
+        prompt = _resolve_prompt(agent_name, ctx, state["evolution"]["swarm_id"])
+    except PromptResolutionError as exc:
+        _freeze_prompt(state, exc.reason, exc.original or exc)
         return state
 
     llm = get_llm_backend(model)
