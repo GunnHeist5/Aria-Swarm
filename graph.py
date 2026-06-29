@@ -25,6 +25,7 @@ The financial formula is NOT re-derived here — it is owned by
 
 from __future__ import annotations
 
+import logging
 import os
 from typing import Any
 
@@ -34,8 +35,15 @@ from langgraph.types import Command, interrupt  # noqa: F401 — Command re-expo
 
 import registry
 from prompts import render_agent_prompt
-from state import BusinessState, ICRStage, compute_metabolic_ratio
+from state import (
+    BusinessState,
+    ICRStage,
+    compute_metabolic_ratio,
+    evaluate_metabolic_state,
+)
 from tools.hitl import dispatch_hitl_alert
+
+logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # Routing configuration
@@ -134,16 +142,31 @@ def metabolic_check_node(state: BusinessState) -> BusinessState:
     ratio = compute_metabolic_ratio(financials)
     financials["metabolic_ratio"] = ratio
 
+    # Lifecycle label (extinction/replication/saving/growth) — drives the
+    # lifecycle transitions in main.py and the extinction short-circuit below.
+    state["metabolic_state"] = evaluate_metabolic_state(financials)
+
+    # Model routing is an independent, ratio-based concern: an unprofitable
+    # swarm drops to the cheap Hermes fleet regardless of its lifecycle label.
     if ratio < 1.0:
         state["llm"]["active_model"] = SAVING_MODE_MODEL
         state["llm"]["saving_mode_active"] = True
-        state["metabolic_state"] = "saving"
     else:
         state["llm"]["active_model"] = SPECIALIST_MODEL
         state["llm"]["saving_mode_active"] = False
-        state["metabolic_state"] = "growth"
 
     return state
+
+
+def _route_lifecycle(state: BusinessState) -> str:
+    """Route after the metabolic check: a dead swarm skips the dialectic.
+
+    On extinction the cycle short-circuits straight to END — no inference is
+    spent ideating for a swarm that is terminating. main.py then runs the
+    graceful self-termination sequence.
+    """
+
+    return "extinct" if state["metabolic_state"] == "extinction" else "continue"
 
 
 def _agent_context(state: BusinessState) -> dict:
@@ -372,8 +395,15 @@ def build_graph(checkpointer=None):
         g.add_node(gate_name, hitl_gate_node)
 
     g.add_edge(START, "metabolic_check")
+    # After the metabolic check: extinction short-circuits to END, else proceed
+    # into the dialectic via the first HITL gate.
+    g.add_conditional_edges(
+        "metabolic_check", _route_lifecycle,
+        {"extinct": END, "continue": "gate_metabolic"},
+    )
     for i, (node_name, _, gate_name) in enumerate(_GATED_PATH):
-        g.add_edge(node_name, gate_name)  # node -> its gate
+        if node_name != "metabolic_check":
+            g.add_edge(node_name, gate_name)  # node -> its gate
         # gate -> next working node, or END after the last gate.
         if i + 1 < len(_GATED_PATH):
             g.add_edge(gate_name, _GATED_PATH[i + 1][0])

@@ -172,6 +172,19 @@ def register_swarm(
         conn.close()
 
 
+def set_swarm_status(swarm_id: str, status: str, db_path: Path = DB_PATH) -> None:
+    """Update a swarm's lifecycle status (e.g. mark it ``extinct``)."""
+
+    conn = _connect(db_path)
+    try:
+        conn.execute(
+            "UPDATE swarms SET status = ? WHERE swarm_id = ?", (status, swarm_id)
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
 # ---------------------------------------------------------------------------
 # Plasmids
 # ---------------------------------------------------------------------------

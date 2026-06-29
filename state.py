@@ -130,6 +130,7 @@ class EvolutionState(TypedDict):
     parent_swarm_id: Optional[str]       # Lineage pointer (None for genesis swarm).
     generation: int                      # Replication depth from genesis.
     genome_hash: str                     # Hash of CLAUDE.md + agents/*.md + edge weights.
+    child_swarm_ids: List[str]           # Child swarms spawned via Replication.
 
     # HGT — Shared Plasmid Database interface.
     last_hgt_pull_cycle: int             # Cycle index of last elite-gene hot-swap.
@@ -258,6 +259,32 @@ def compute_metabolic_ratio(financials: FinancialState) -> float:
     return financials["revenue_generated_usdc"] / costs
 
 
+def evaluate_metabolic_state(financials: FinancialState) -> str:
+    """Classify the swarm's lifecycle state from its financials.
+
+    Precedence (highest first):
+      * ``extinction``  — wallet depleted *after* the swarm was funded. A
+        never-funded genesis (seed 0, revenue 0, wallet 0) is NOT extinct — it is
+        merely dormant; killing it on boot would be the "genesis trap".
+      * ``replication`` — wallet at/above the replication surplus threshold.
+      * ``saving``      — metabolic ratio below 1.0 (unprofitable; conserve).
+      * ``growth``      — otherwise.
+    """
+
+    wallet = financials["wallet_balance_usdc"]
+    was_funded = (
+        financials["seed_capital_usdc"] > 0.0
+        or financials["revenue_generated_usdc"] > 0.0
+    )
+    if wallet <= 0.0 and was_funded:
+        return "extinction"
+    if wallet >= financials["replication_threshold_usdc"]:
+        return "replication"
+    if financials["metabolic_ratio"] < 1.0:
+        return "saving"
+    return "growth"
+
+
 def new_business_state(
     *,
     swarm_id: str,
@@ -302,6 +329,7 @@ def new_business_state(
         "parent_swarm_id": None,
         "generation": 0,
         "genome_hash": "",
+        "child_swarm_ids": [],
         "last_hgt_pull_cycle": 0,
         "broadcast_genes": [],
         "adopted_genes": [],

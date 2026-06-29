@@ -29,6 +29,7 @@ from pathlib import Path
 logging.getLogger("langgraph.checkpoint.serde.jsonplus").setLevel(logging.ERROR)
 warnings.filterwarnings("ignore", message=r".*unregistered type.*")
 
+import evolution  # noqa: E402
 import registry  # noqa: E402
 from graph import app  # noqa: E402 — import after the warning filter is installed
 from state import new_business_state  # noqa: E402
@@ -202,6 +203,43 @@ def _persist_and_exit_on_freeze(values: dict) -> int:
     return 2
 
 
+def handle_lifecycle(values: dict) -> int | None:
+    """Act on the cycle's metabolic_state. Returns a terminal exit code or None.
+
+    * extinction  -> graceful self-termination; caller persists + exits 3.
+    * replication -> spawn a mutated, funded child; parent continues (None).
+    """
+
+    mstate = values["metabolic_state"]
+    if mstate == "extinction":
+        evolution.extinct(values, db_path=registry.DB_PATH)
+        print(
+            "\n################## ☠️  SWARM EXTINCTION ☠️  ##################\n"
+            f"  swarm   : {values['evolution']['swarm_id']}\n"
+            f"  wallet  : {values['financials']['wallet_balance_usdc']:.2f} USDC\n"
+            "  action  : graceful self-termination — final snapshot persisted\n"
+            "############################################################\n"
+        )
+        return 3
+
+    if mstate == "replication":
+        try:
+            child = evolution.replicate(
+                values,
+                db_path=registry.DB_PATH,
+                pool_path=registry.SHARED_POOL_PATH,
+                children_dir=STATE_DIR / "children",
+            )
+            print(
+                f"[replication] spawned {child['child_swarm_id']} "
+                f"(gen {child['generation']}, funded {child['funded_usdc']:.2f} USDC, "
+                f"mutated {child['mutated_roles']}) -> {child['snapshot']}"
+            )
+        except Exception as exc:  # replication is best-effort; never crash the loop
+            print(f"[replication] failed: {exc}")
+    return None
+
+
 def run_cron() -> int:
     """One discrete tick: hydrate -> run one cycle -> persist -> exit."""
 
@@ -217,8 +255,9 @@ def run_cron() -> int:
     print_transition(values, working["cycle_count"])
     if frozen:
         return _persist_and_exit_on_freeze(values)
+    term = handle_lifecycle(values)
     save_state(values)
-    return 0
+    return term if term is not None else 0
 
 
 def run_auto(max_cycles: int) -> int:
@@ -243,6 +282,10 @@ def run_auto(max_cycles: int) -> int:
         print_transition(values, working["cycle_count"])
         if frozen:
             return _persist_and_exit_on_freeze(values)
+        term = handle_lifecycle(values)  # extinction terminates; replication spawns
+        if term is not None:
+            save_state(values)
+            return term
         working = values  # carry forward for the next cycle
 
     print(f"[auto] stopped after {completed} cycle(s).")
@@ -268,6 +311,10 @@ def run_interactive(max_cycles: int) -> int:
         print_transition(values, working["cycle_count"])
         if frozen:
             return _persist_and_exit_on_freeze(values)
+        term = handle_lifecycle(values)
+        if term is not None:
+            save_state(values)
+            return term
         working = values
 
         try:
