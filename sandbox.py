@@ -190,6 +190,7 @@ def run_red_queen_trial(
     db_path: Path = DB_PATH,
     mutate_model: str = SAVING_MODE_MODEL,
     adversary_model: str = SPECIALIST_MODEL,
+    broadcast: bool = True,
 ) -> TrialResult:
     """Evolve one role's gene against the adversary; promote a stable champion.
 
@@ -253,6 +254,16 @@ def run_red_queen_trial(
     if promoted:
         registry.clear_for_production(champ_hash, db_path)
         logger.info("promoted champion %s (fitness %.3f)", champ_hash[:12], champ_fitness)
+        if broadcast:
+            # HGT: share the proven champion to the cross-swarm pool.
+            try:
+                registry.broadcast_gene(
+                    swarm_id, champ_hash,
+                    db_path=db_path, pool_path=registry.SHARED_POOL_PATH,
+                )
+                logger.info("broadcast champion %s to plasmid pool", champ_hash[:12])
+            except Exception as exc:  # pool optional — never fail a trial on it
+                logger.warning("HGT broadcast failed: %s", exc)
 
     return TrialResult(
         role=role,

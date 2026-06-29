@@ -167,6 +167,28 @@ def bootstrap_registry(state: dict) -> None:
     swarm_id = state["evolution"]["swarm_id"]
     try:
         registry.seed_genesis_genome(swarm_id, registry.DB_PATH)
+
+        # Horizontal Gene Transfer sync: adopt superior foreign genes from the
+        # shared pool, then broadcast our own proven champions back into it.
+        adopted = registry.pull_elite_genes(
+            swarm_id, db_path=registry.DB_PATH, pool_path=registry.SHARED_POOL_PATH
+        )
+        shared = registry.broadcast_active_genome(
+            swarm_id, db_path=registry.DB_PATH, pool_path=registry.SHARED_POOL_PATH
+        )
+        ev = state["evolution"]
+        if adopted:
+            ev["adopted_genes"] = sorted(
+                {*ev.get("adopted_genes", []), *(a["gene_hash"] for a in adopted)}
+            )
+            ev["last_hgt_pull_cycle"] = state["cycle_count"]
+            print(f"[hgt] pulled {len(adopted)} elite gene(s): "
+                  f"{[a['role'] for a in adopted]}")
+        if shared:
+            ev["broadcast_genes"] = sorted(
+                {*ev.get("broadcast_genes", []), *(s["gene_hash"] for s in shared)}
+            )
+            print(f"[hgt] broadcast {len(shared)} champion gene(s) to the pool")
         print(f"[boot] registry genome seeded for {swarm_id}")
     except Exception as exc:  # registry optional — file fallback keeps us running
         print(f"[boot] WARNING: registry bootstrap failed ({exc}); using file genome.")

@@ -34,6 +34,14 @@ from prompts import AGENTS_DIR
 STATE_DIR = Path("~/.automaton").expanduser()
 DB_PATH = STATE_DIR / "swarm_genome.db"
 
+# The cross-swarm Shared Plasmid Database (HGT). Distinct from each swarm's local
+# genome DB: every swarm instance broadcasts elite genes here and pulls superior
+# foreign genes from here. In a multi-container deploy point this at a shared
+# volume / network mount via SWARM_PLASMID_POOL.
+SHARED_POOL_PATH = Path(
+    os.environ.get("SWARM_PLASMID_POOL", STATE_DIR / "shared_plasmid_pool.db")
+)
+
 # Roles whose prompts live as genome files in agents/.
 AGENT_ROLES = ("visionary", "realist", "synthesizer")
 
@@ -416,3 +424,199 @@ def seed_genesis_genome(swarm_id: str, db_path: Path = DB_PATH) -> dict:
         )
         seeded[role] = result["plasmid_hash"]
     return seeded
+
+
+# ---------------------------------------------------------------------------
+# Horizontal Gene Transfer — the cross-swarm Shared Plasmid Database
+# ---------------------------------------------------------------------------
+
+_POOL_SCHEMA = """
+CREATE TABLE IF NOT EXISTS plasmid_pool (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    gene_hash       TEXT NOT NULL UNIQUE,
+    role            TEXT NOT NULL,
+    prompt_text     TEXT NOT NULL,
+    origin_swarm_id TEXT,
+    fitness_score   REAL NOT NULL DEFAULT 0,
+    generation_id   INTEGER NOT NULL DEFAULT 0,
+    broadcast_count INTEGER NOT NULL DEFAULT 1,
+    broadcast_at    TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_pool_role ON plasmid_pool(role);
+"""
+
+
+def initialize_pool(pool_path: Path = SHARED_POOL_PATH) -> Path:
+    """Create the shared plasmid pool database if absent. Idempotent."""
+
+    pool_path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    conn = _connect(pool_path)
+    try:
+        conn.executescript(_POOL_SCHEMA)
+        conn.commit()
+    finally:
+        conn.close()
+    return pool_path
+
+
+def _local_best_fitness(plasmid_hash: str, db_path: Path) -> float:
+    """Highest recorded fitness for a local plasmid (0.0 if unscored)."""
+
+    conn = _connect(db_path)
+    try:
+        row = conn.execute(
+            "SELECT MAX(fitness_score) AS f FROM evaluation_logs WHERE plasmid_hash = ?",
+            (plasmid_hash,),
+        ).fetchone()
+        return row["f"] if row and row["f"] is not None else 0.0
+    finally:
+        conn.close()
+
+
+def broadcast_gene(
+    swarm_id: str,
+    plasmid_hash: str,
+    *,
+    db_path: Path = DB_PATH,
+    pool_path: Path = SHARED_POOL_PATH,
+) -> dict:
+    """Publish a local elite gene to the shared pool (HGT broadcast).
+
+    Upserts on the gene hash: the pool always keeps the best-known fitness for a
+    gene and counts re-broadcasts. Raises ``KeyError`` for an unknown local hash.
+
+    Returns ``{"gene_hash", "role", "fitness", "broadcast_count"}``.
+    """
+
+    rec = get_plasmid(plasmid_hash, db_path)
+    if rec is None:
+        raise KeyError(f"unknown local plasmid_hash: {plasmid_hash}")
+
+    fitness = _local_best_fitness(plasmid_hash, db_path)
+    initialize_pool(pool_path)
+    conn = _connect(pool_path)
+    try:
+        conn.execute(
+            "INSERT INTO plasmid_pool "
+            "(gene_hash, role, prompt_text, origin_swarm_id, fitness_score, "
+            " generation_id, broadcast_count, broadcast_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, 1, ?) "
+            "ON CONFLICT(gene_hash) DO UPDATE SET "
+            "  fitness_score = MAX(fitness_score, excluded.fitness_score), "
+            "  broadcast_count = broadcast_count + 1, "
+            "  broadcast_at = excluded.broadcast_at",
+            (rec["plasmid_hash"], rec["role"], rec["prompt_text"], swarm_id,
+             fitness, rec["generation_id"], _now()),
+        )
+        conn.commit()
+        row = conn.execute(
+            "SELECT broadcast_count FROM plasmid_pool WHERE gene_hash = ?",
+            (plasmid_hash,),
+        ).fetchone()
+    finally:
+        conn.close()
+    return {
+        "gene_hash": plasmid_hash, "role": rec["role"],
+        "fitness": fitness, "broadcast_count": row["broadcast_count"],
+    }
+
+
+def broadcast_active_genome(
+    swarm_id: str,
+    *,
+    db_path: Path = DB_PATH,
+    pool_path: Path = SHARED_POOL_PATH,
+) -> list[dict]:
+    """Broadcast this swarm's *proven* production champions (fitness > 0).
+
+    Baseline genes (no evaluations yet, fitness 0) are not shared — only genes
+    the swarm has actually validated propagate into the pool.
+    """
+
+    shared = []
+    for role, rec in get_active_plasmids(swarm_id, db_path).items():
+        if rec["fitness"] > 0:
+            shared.append(broadcast_gene(
+                swarm_id, rec["plasmid_hash"], db_path=db_path, pool_path=pool_path
+            ))
+    return shared
+
+
+def pull_elite_genes(
+    swarm_id: str,
+    roles=AGENT_ROLES,
+    *,
+    db_path: Path = DB_PATH,
+    pool_path: Path = SHARED_POOL_PATH,
+    min_advantage: float = 0.0,
+) -> list[dict]:
+    """Pull superior foreign genes from the pool and hot-swap them in (HGT pull).
+
+    For each role, adopt the highest-fitness pool gene that (a) did not originate
+    from this swarm and (b) beats this swarm's local production champion by more
+    than ``min_advantage``. Adopted genes are registered locally as ``hgt``
+    plasmids cleared for production and scored with the pool fitness — so
+    ``get_active_genome`` immediately serves them.
+
+    The fitness filter makes this idempotent: once adopted+scored, a gene no
+    longer beats the local champion, so re-pulling won't re-adopt it.
+
+    Returns the list of adopted ``{role, gene_hash, origin_swarm_id, fitness}``.
+    """
+
+    initialize_registry(db_path)
+    initialize_pool(pool_path)
+    local = get_active_plasmids(swarm_id, db_path)
+
+    adopted: list[dict] = []
+    conn = _connect(pool_path)
+    try:
+        for role in roles:
+            local_fit = local.get(role, {}).get("fitness", -1.0)
+            cand = conn.execute(
+                "SELECT * FROM plasmid_pool "
+                "WHERE role = ? AND (origin_swarm_id IS NULL OR origin_swarm_id != ?) "
+                "ORDER BY fitness_score DESC LIMIT 1",
+                (role, swarm_id),
+            ).fetchone()
+            if cand is None or cand["fitness_score"] <= local_fit + min_advantage:
+                continue
+
+            register_plasmid(
+                role, cand["prompt_text"], swarm_id=swarm_id,
+                mutation_type=MUTATION_HGT, generation_id=cand["generation_id"],
+                cleared_for_production=True, db_path=db_path,
+            )
+            clear_for_production(cand["gene_hash"], db_path)
+            log_evaluation(
+                cand["gene_hash"], cand["fitness_score"], swarm_id=swarm_id,
+                notes=f"hgt pull from {cand['origin_swarm_id']}", db_path=db_path,
+            )
+            adopted.append({
+                "role": role, "gene_hash": cand["gene_hash"],
+                "origin_swarm_id": cand["origin_swarm_id"],
+                "fitness": cand["fitness_score"],
+            })
+    finally:
+        conn.close()
+    return adopted
+
+
+def list_pool(role: str | None = None, pool_path: Path = SHARED_POOL_PATH) -> list[dict]:
+    """Inspect the shared pool (optionally filtered to a role)."""
+
+    initialize_pool(pool_path)
+    conn = _connect(pool_path)
+    try:
+        if role is None:
+            rows = conn.execute(
+                "SELECT * FROM plasmid_pool ORDER BY role, fitness_score DESC"
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT * FROM plasmid_pool WHERE role = ? ORDER BY fitness_score DESC",
+                (role,),
+            ).fetchall()
+        return [dict(r) for r in rows]
+    finally:
+        conn.close()
