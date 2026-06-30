@@ -29,6 +29,15 @@ from pathlib import Path
 logging.getLogger("langgraph.checkpoint.serde.jsonplus").setLevel(logging.ERROR)
 warnings.filterwarnings("ignore", message=r".*unregistered type.*")
 
+# Load a local .env into the process environment BEFORE any project import —
+# graph.py / registry.py read some vars at module-import time. No-op if absent.
+try:
+    from dotenv import load_dotenv
+
+    load_dotenv()
+except ImportError:
+    pass
+
 import bootstrap  # noqa: E402
 import capital  # noqa: E402
 import evolution  # noqa: E402

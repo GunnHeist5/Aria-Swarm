@@ -32,6 +32,14 @@ import argparse
 import sys
 from datetime import datetime, timezone
 
+# Load .env before project imports (graph reads some env at import time).
+try:
+    from dotenv import load_dotenv
+
+    load_dotenv()
+except ImportError:
+    pass
+
 from langgraph.types import Command
 
 from graph import app

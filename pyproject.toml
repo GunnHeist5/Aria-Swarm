@@ -24,6 +24,9 @@ dependencies = [
     # Base/Solana, gasless via Paymaster. The 2026 standardized toolkit for
     # on-chain AI agents.
     "coinbase-agentkit==0.7.4",
+
+    # Loads a local .env into the environment at CLI startup (secret injection).
+    "python-dotenv==1.2.2",
 ]
 
 [build-system]

@@ -26,6 +26,14 @@ import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
+# Load .env before project imports (graph reads some env at import time).
+try:
+    from dotenv import load_dotenv
+
+    load_dotenv()
+except ImportError:
+    pass
+
 import registry
 from graph import SAVING_MODE_MODEL, SPECIALIST_MODEL, get_llm_backend
 from registry import AGENT_ROLES, DB_PATH
