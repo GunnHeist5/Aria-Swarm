@@ -12,3 +12,4 @@ env/
 wallet.json
 .env
 .env.*
+!.env.example

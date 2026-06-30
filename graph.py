@@ -68,12 +68,59 @@ TOGETHER_BASE_URL = os.environ.get(
 # Self-hosted Akash endpoint for the Immortality Protocol panic-switch.
 AKASH_HERMES_BASE_URL = os.environ.get("AKASH_HERMES_BASE_URL", "")
 
-# Map each Hermes backend flag to (hosted model slug, base URL).
-HERMES_MODEL_SLUGS = {
-    "hermes-3-70b": ("nousresearch/hermes-3-llama-3.1-70b", OPENROUTER_BASE_URL),
-    "hermes-3-8b": ("nousresearch/hermes-3-llama-3.1-8b", OPENROUTER_BASE_URL),
-    "hermes-3-akash": ("hermes-3", AKASH_HERMES_BASE_URL),
+# Hermes backend flags (validity set for fail-closed routing).
+HERMES_MODELS = {"hermes-3-70b", "hermes-3-8b", "hermes-3-akash"}
+
+# Per-provider model slugs. Provider naming conventions differ, so each provider
+# gets its own slug map; the Together slugs are env-overridable because the exact
+# hosted ids can shift (8B falls back to 70B when a provider doesn't host it).
+OPENROUTER_HERMES_SLUGS = {
+    "hermes-3-70b": "nousresearch/hermes-3-llama-3.1-70b",
+    "hermes-3-8b": "nousresearch/hermes-3-llama-3.1-8b",
 }
+TOGETHER_HERMES_SLUGS = {
+    "hermes-3-70b": os.environ.get("HERMES_70B_SLUG", "NousResearch/Hermes-3-Llama-3.1-70B"),
+    "hermes-3-8b": os.environ.get("HERMES_8B_SLUG", "NousResearch/Hermes-3-Llama-3.1-70B"),
+}
+
+
+def _hermes_provider() -> str:
+    """Resolve which OpenAI-compatible host serves the Hermes fleet.
+
+    Explicit ``HERMES_PROVIDER`` wins; otherwise infer from whichever key is
+    present (OpenRouter preferred), defaulting to OpenRouter.
+    """
+
+    explicit = os.environ.get("HERMES_PROVIDER", "").strip().lower()
+    if explicit in ("openrouter", "together"):
+        return explicit
+    if os.environ.get("OPENROUTER_API_KEY"):
+        return "openrouter"
+    if os.environ.get("TOGETHER_API_KEY"):
+        return "together"
+    return "openrouter"
+
+
+def _hermes_backend_config(active_model: str) -> tuple[str, str, str | None]:
+    """Return (model_slug, base_url, api_key) for a Hermes backend flag."""
+
+    if active_model == "hermes-3-akash":  # Immortality Protocol self-host
+        return "hermes-3", AKASH_HERMES_BASE_URL, (
+            os.environ.get("OPENROUTER_API_KEY") or os.environ.get("TOGETHER_API_KEY")
+        )
+
+    provider = _hermes_provider()
+    if provider == "together":
+        return (
+            TOGETHER_HERMES_SLUGS[active_model],
+            TOGETHER_BASE_URL,
+            os.environ.get("TOGETHER_API_KEY"),
+        )
+    return (
+        OPENROUTER_HERMES_SLUGS[active_model],
+        OPENROUTER_BASE_URL,
+        os.environ.get("OPENROUTER_API_KEY"),
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -104,15 +151,10 @@ def get_llm_backend(active_model: str) -> Any:
             temperature=0.2,
         )
 
-    if active_model in HERMES_MODEL_SLUGS:
+    if active_model in HERMES_MODELS:
         from langchain_openai import ChatOpenAI
 
-        slug, base_url = HERMES_MODEL_SLUGS[active_model]
-        # OpenRouter and Together both accept the OpenAI-compatible interface;
-        # pick whichever key is present (OpenRouter preferred).
-        api_key = os.environ.get("OPENROUTER_API_KEY") or os.environ.get(
-            "TOGETHER_API_KEY"
-        )
+        slug, base_url, api_key = _hermes_backend_config(active_model)
         return ChatOpenAI(
             model=slug,
             base_url=base_url or None,

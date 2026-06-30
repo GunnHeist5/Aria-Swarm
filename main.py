@@ -80,9 +80,32 @@ def load_state() -> dict:
     creator_key = os.environ.get("CREATOR_AUDIT_KEY", PLACEHOLDER_CREATOR_KEY)
     if creator_key == PLACEHOLDER_CREATOR_KEY:
         print("[boot] WARNING: CREATOR_AUDIT_KEY unset — using placeholder key.")
-    state = new_business_state(swarm_id=THREAD_ID, creator_audit_key=creator_key)
-    print("[boot] no snapshot found — initialized fresh genesis state.")
+    state = new_business_state(
+        swarm_id=THREAD_ID,
+        creator_audit_key=creator_key,
+        seed_capital_usdc=_env_float("SEED_CAPITAL_USDC", 0.0),
+        auto_mode_budget_usd=_env_float("AUTO_MODE_BUDGET_USD", 0.0),
+        replication_threshold_usdc=_env_float("REPLICATION_THRESHOLD_USDC", 5_000.0),
+    )
+    print(
+        f"[boot] genesis: seed {state['financials']['seed_capital_usdc']:.2f} USDC, "
+        f"auto-budget {state['financials']['auto_mode_budget_usd']:.2f}, "
+        f"replication@{state['financials']['replication_threshold_usdc']:.0f}"
+    )
     return state
+
+
+def _env_float(name: str, default: float) -> float:
+    """Parse a float env var, falling back safely on missing/garbage input."""
+
+    raw = os.environ.get(name)
+    if not raw:
+        return default
+    try:
+        return float(raw)
+    except ValueError:
+        print(f"[boot] WARNING: {name}={raw!r} is not a number — using {default}.")
+        return default
 
 
 def save_state(values: dict) -> None:
@@ -166,7 +189,29 @@ def bootstrap_if_needed(state: dict) -> None:
 
     if not state["first_run_complete"]:
         bootstrap.run_bootstrap(state)
+        _sync_onchain_balance(state)  # seed the real treasury if the wallet is live
         save_state(state)  # persist identity/env/creator before the first cycle
+
+
+def _sync_onchain_balance(state: dict) -> None:
+    """One-time (genesis) best-effort sync of the real wallet USDC balance.
+
+    When the operational wallet came up ``ready``, overwrite ``wallet_balance_usdc``
+    with the on-chain USDC balance so the metabolic/capital/lifecycle logic runs
+    on the real treasury. Genesis-only so it never fights the simulated ledger
+    (dividends / replication debits) on later cycles. Non-fatal.
+    """
+
+    if state["operational_flags"].get("operational_wallet") != "ready":
+        return
+    try:
+        from tools.wallet import get_wallet_balance_usdc, initialize_wallet
+
+        balance = get_wallet_balance_usdc(initialize_wallet())
+        state["financials"]["wallet_balance_usdc"] = balance
+        print(f"[boot] synced on-chain wallet balance: {balance:.2f} USDC")
+    except Exception as exc:  # wallet not actually reachable — keep the env seed
+        print(f"[boot] on-chain balance sync skipped ({exc}); using seed capital.")
 
 
 def bootstrap_registry(state: dict) -> None:
