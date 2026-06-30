@@ -145,8 +145,10 @@ def get_llm_backend(active_model: str) -> Any:
     if active_model == SPECIALIST_MODEL:
         from langchain_anthropic import ChatAnthropic
 
+        # "claude-3-5-sonnet" is the internal routing label; the actual API model
+        # id is configurable (accounts differ on which Sonnet they can access).
         return ChatAnthropic(
-            model="claude-3-5-sonnet-latest",
+            model=os.environ.get("CLAUDE_MODEL", "claude-sonnet-4-6"),
             api_key=os.environ.get("ANTHROPIC_API_KEY"),
             temperature=0.2,
         )
