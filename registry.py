@@ -43,7 +43,7 @@ SHARED_POOL_PATH = Path(
 )
 
 # Roles whose prompts live as genome files in agents/.
-AGENT_ROLES = ("visionary", "realist", "synthesizer")
+AGENT_ROLES = ("visionary", "realist", "synthesizer", "qualifier")
 
 # Mutation provenance for a plasmid.
 MUTATION_GENESIS = "genesis"

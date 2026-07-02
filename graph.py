@@ -1,23 +1,29 @@
 """graph.py — LangGraph orchestration for the autonomous evolutionary swarm.
 
-This module wires the first executable control flow of the organism:
+The graph is **event-dispatched**: every invoke enters through a dispatch
+router that reads ``state["event"]`` and wakes only the subgraph that trigger
+needs — operations are event-driven, and the clock is reserved for the
+metabolic heartbeat.
 
-  START -> metabolic_check -> visionary -> realist -> synthesizer -> END
+  START -> dispatch ─┬─ heartbeat/wallet_low -> metabolic_check -> END
+                     ├─ ideation     -> metabolic_check -> visionary -> realist
+                     │                                     -> synthesizer -> END
+                     ├─ seller_reply -> qualify_reply -> END
+                     ├─ deal_closed  -> book_revenue -> metabolic_check -> END
+                     ├─ new_leads_synced -> ops_event -> END
+                     └─ offer_accepted / unknown -> escalate (HITL freeze)
 
-Two architectural mechanics live here:
+Three architectural mechanics live here:
 
   1. The **Hybrid-LLM router** — ``metabolic_check_node`` recomputes the
-     metabolic ratio every cycle and hot-swaps the active model backend between
-     the premium Claude specialist and the cheap Hermes 3 fleet.
+     metabolic ratio and hot-swaps the active model backend between the
+     premium Claude specialist and the cheap Hermes 3 fleet.
   2. The **Dialectical Ideation (ICR) loop** — Visionary -> Realist ->
      Synthesizer, with hard model assignments per the routing rules in
-     ``CLAUDE.md`` (Visionary is unconditionally Hermes; Synthesizer is
-     unconditionally Claude).
-
-The node bodies are deterministic placeholders: they perform the routing and
-state transitions correctly, but stub the actual LLM prompt invocation so the
-topology is runnable and testable without network access or API keys. Real
-prompt calls are marked with ``TODO(prompt)``.
+     ``CLAUDE.md``. Runs only on an explicit ``ideation`` event, never on a
+     heartbeat tick — a metabolic pulse spends no inference on ideating.
+  3. **Fail-closed eventing** — a malformed payload, an unknown event type, or
+     ``offer_accepted`` (contract signing = CRITICAL_GATE) freezes via HITL.
 
 The financial formula is NOT re-derived here — it is owned by
 ``state.compute_metabolic_ratio`` and reused.
@@ -25,6 +31,7 @@ The financial formula is NOT re-derived here — it is owned by
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 from typing import Any
@@ -42,6 +49,7 @@ from state import (
     evaluate_metabolic_state,
 )
 from tools.hitl import dispatch_hitl_alert
+from tools.revenue import book_closed_deal
 
 logger = logging.getLogger(__name__)
 
@@ -165,6 +173,68 @@ def get_llm_backend(active_model: str) -> Any:
         )
 
     raise ValueError(f"Unknown active_model backend: {active_model!r}")
+
+
+# ---------------------------------------------------------------------------
+# Event dispatch — the single entry router
+# ---------------------------------------------------------------------------
+
+# Event type -> the first node of its subgraph. Anything not listed here routes
+# to the escalate node (fail-closed: an unrecognized trigger freezes for HITL
+# instead of being guessed at).
+_EVENT_ROUTES = {
+    "heartbeat": "metabolic_check",
+    "wallet_low": "metabolic_check",   # forces a saving-mode re-evaluation
+    "ideation": "metabolic_check",     # metabolic first, then the full dialectic
+    "seller_reply": "qualify_reply",
+    "deal_closed": "book_revenue",
+    "new_leads_synced": "ops_event",
+    "offer_accepted": "escalate",      # contract signing = CRITICAL_GATE, always
+}
+
+
+def dispatch_node(state: BusinessState) -> BusinessState:
+    """Consume ``state['event']`` and stage it for routing.
+
+    The pending event is copied into ``operational_flags['last_event']`` (the
+    routers and event nodes read it there) and cleared from the state, so a
+    persisted snapshot can never re-fire a stale trigger on the next hydrate.
+    A missing/None event is a heartbeat — full back-compat with ``--cron``.
+    """
+
+    event = state.get("event") or {}
+    etype = event.get("type") or "heartbeat"
+    state["operational_flags"]["last_event"] = {
+        "type": etype,
+        "payload": event.get("payload") or {},
+        "received_at": event.get("received_at"),
+    }
+    state["event"] = None  # consumed — never re-fires from a snapshot
+    return state
+
+
+def _last_event(state: BusinessState) -> dict:
+    """The staged event for this invoke (set by ``dispatch_node``)."""
+
+    return state["operational_flags"].get("last_event") or {
+        "type": "heartbeat", "payload": {}, "received_at": None,
+    }
+
+
+def _route_event(state: BusinessState) -> str:
+    """Entry router: event type -> first node of its subgraph (else escalate)."""
+
+    return _EVENT_ROUTES.get(_last_event(state)["type"], "escalate")
+
+
+def _route_after_metabolic(state: BusinessState) -> str:
+    """After the metabolic gate: only an ``ideation`` event runs the dialectic.
+
+    A heartbeat (or wallet_low / deal_closed joining the metabolic path) ends
+    the invoke here — the tick spends no inference on ideating.
+    """
+
+    return "ideate" if _last_event(state)["type"] == "ideation" else "done"
 
 
 # ---------------------------------------------------------------------------
@@ -385,6 +455,117 @@ def synthesizer_node(state: BusinessState) -> BusinessState:
 
 
 # ---------------------------------------------------------------------------
+# Event nodes — one per operational trigger
+# ---------------------------------------------------------------------------
+
+
+def qualify_reply_node(state: BusinessState) -> BusinessState:
+    """``seller_reply`` — qualify an inbound seller response, right now.
+
+    Muffin's Seller Response Monitor is the sensor; this node is the brain. The
+    ``qualifier`` genome role (registry-first, evolvable like every gene) reads
+    the reply + lead context and returns a triage verdict. The result is only
+    recorded — responding/offering stays with the operator behind its gates.
+    """
+
+    event = _last_event(state)
+    payload = event["payload"]
+    lead_id = str(payload.get("lead_id") or "unknown")
+
+    ctx = _agent_context(state)
+    ctx["reply_text"] = str(payload.get("reply_text") or "(empty reply)")
+    ctx["lead_context"] = json.dumps(
+        {k: v for k, v in payload.items() if k != "reply_text"}, default=str
+    )
+
+    try:
+        prompt = _resolve_prompt("qualifier", ctx, state["evolution"]["swarm_id"])
+    except PromptResolutionError as exc:
+        _freeze_prompt(state, exc.reason, exc.original or exc)
+        return state
+
+    llm = get_llm_backend(state["llm"]["active_model"])
+    assessment = _content(llm.invoke(prompt))
+
+    qualified = state["operational_flags"].setdefault("qualified_replies", {})
+    qualified[lead_id] = {
+        "assessment": assessment,
+        "received_at": event.get("received_at"),
+        "contact": payload.get("contact"),
+    }
+    state["error_log"].append(f"QUALIFIED: seller reply for lead {lead_id}")
+    return state
+
+
+def book_revenue_node(state: BusinessState) -> BusinessState:
+    """``deal_closed`` — book the swarm's cut of a closed deal into the treasury.
+
+    Delegates to ``tools.revenue.book_closed_deal`` (idempotent per deal_id),
+    then flows into ``metabolic_check`` so a big close can flip the capital
+    phase in the same invoke. A malformed payload freezes instead of guessing
+    at money numbers.
+    """
+
+    payload = _last_event(state)["payload"]
+    try:
+        result = book_closed_deal(
+            state,
+            deal_id=str(payload["deal_id"]),
+            assignment_fee_usd=float(payload["assignment_fee_usd"]),
+            swarm_cut_pct=float(payload.get("swarm_cut_pct", 0.10)),
+        )
+    except (KeyError, TypeError, ValueError) as exc:
+        hitl = state["hitl"]
+        hitl["hitl_pending"] = True
+        hitl["requires_auth"] = True
+        hitl["hitl_reason"] = "malformed_event:deal_closed"
+        state["error_log"].append(f"BOOKING_FAILED: bad deal_closed payload: {exc}")
+        return state
+
+    state["operational_flags"]["last_booking"] = result
+    return state
+
+
+def ops_event_node(state: BusinessState) -> BusinessState:
+    """``new_leads_synced`` — pipeline bookkeeping after a lead sync."""
+
+    event = _last_event(state)
+    pipeline = state["operational_flags"].setdefault("lead_pipeline", {})
+    pipeline["last_sync"] = {"received_at": event.get("received_at"), **event["payload"]}
+    pipeline["total_syncs"] = pipeline.get("total_syncs", 0) + 1
+    state["error_log"].append(f"LEADS_SYNCED: {event['payload'] or '(no payload)'}")
+    return state
+
+
+def escalate_node(state: BusinessState) -> BusinessState:
+    """``offer_accepted`` / unknown events — raise the HITL flags and record why.
+
+    An accepted offer means a contract is about to be signed: CRITICAL_GATE,
+    never autonomous, regardless of mode. Unknown event types land here too —
+    fail-closed beats guessing. The following gate fires the alert + interrupt.
+    """
+
+    event = _last_event(state)
+    etype = event["type"]
+    hitl = state["hitl"]
+    hitl["hitl_pending"] = True
+    hitl["requires_auth"] = True
+
+    if etype == "offer_accepted":
+        hitl["hitl_reason"] = "critical_gate:contract_signing"
+        hitl["pending_critical_gate_tool"] = "contract_signing"
+        state["operational_flags"]["pending_offer"] = event["payload"]
+        state["error_log"].append(
+            f"CRITICAL_GATE: offer accepted, awaiting human contract sign-off "
+            f"({event['payload'] or 'no payload'})"
+        )
+    else:
+        hitl["hitl_reason"] = f"unknown_event:{etype}"
+        state["error_log"].append(f"UNKNOWN_EVENT: {etype!r} — frozen fail-closed")
+    return state
+
+
+# ---------------------------------------------------------------------------
 # HITL circuit breaker
 # ---------------------------------------------------------------------------
 
@@ -417,27 +598,37 @@ def hitl_gate_node(state: BusinessState) -> BusinessState:
 # Graph topology
 # ---------------------------------------------------------------------------
 
-# Working node -> the HITL gate that guards it. The gate is the same function
-# registered under distinct names so a breach is caught immediately after ANY
-# node (i.e. after any tool call), then resumes into the next working node.
-_GATED_PATH = [
-    ("metabolic_check", metabolic_check_node, "gate_metabolic"),
-    ("visionary", visionary_node, "gate_visionary"),
-    ("realist", realist_node, "gate_realist"),
-    ("synthesizer", synthesizer_node, "gate_synthesizer"),
-]
+# Every working node is guarded by its own HITL gate (the same fail-closed
+# function registered under distinct names), so a breach raised inside ANY
+# node freezes immediately after it.
+_NODE_GATES = {
+    "metabolic_check": "gate_metabolic",
+    "visionary": "gate_visionary",
+    "realist": "gate_realist",
+    "synthesizer": "gate_synthesizer",
+    "qualify_reply": "gate_qualify",
+    "ops_event": "gate_ops",
+    "escalate": "gate_escalate",
+}
 
 
 def build_graph(checkpointer=None):
-    """Construct and compile the swarm graph with HITL checkpointing.
+    """Construct and compile the event-dispatched swarm graph.
 
-    Path (gates interleaved):
-      START -> metabolic_check -> gate_metabolic -> visionary -> gate_visionary
-            -> realist -> gate_realist -> synthesizer -> gate_synthesizer -> END
+    Topology (gates interleaved after every working node):
 
-    Compiled with a checkpointer (``MemorySaver`` by default) so every step's
-    full state is serialized and any interrupt can be resumed by thread id. Pass
-    a shared checkpointer (or a durable ``SqliteSaver``) to override.
+      START -> dispatch ─┬ heartbeat/wallet_low -> metabolic_check -> gate -> END
+                         ├ ideation -> metabolic_check -> gate -> visionary ->
+                         │     gate -> realist -> gate -> synthesizer -> gate -> END
+                         ├ seller_reply -> qualify_reply -> gate -> END
+                         ├ deal_closed -> book_revenue -> metabolic_check -> ...
+                         ├ new_leads_synced -> ops_event -> gate -> END
+                         └ offer_accepted / unknown -> escalate -> gate (interrupt)
+
+    Extinction short-circuits the metabolic path straight to END (a dead swarm
+    spends nothing). Compiled with a checkpointer (``MemorySaver`` by default)
+    so every step's full state is serialized and any interrupt is resumable by
+    thread id.
     """
 
     if checkpointer is None:
@@ -445,25 +636,58 @@ def build_graph(checkpointer=None):
 
     g = StateGraph(BusinessState)
 
-    for node_name, node_fn, gate_name in _GATED_PATH:
-        g.add_node(node_name, node_fn)
+    g.add_node("dispatch", dispatch_node)
+    g.add_node("metabolic_check", metabolic_check_node)
+    g.add_node("visionary", visionary_node)
+    g.add_node("realist", realist_node)
+    g.add_node("synthesizer", synthesizer_node)
+    g.add_node("qualify_reply", qualify_reply_node)
+    g.add_node("book_revenue", book_revenue_node)
+    g.add_node("ops_event", ops_event_node)
+    g.add_node("escalate", escalate_node)
+    for gate_name in _NODE_GATES.values():
         g.add_node(gate_name, hitl_gate_node)
 
-    g.add_edge(START, "metabolic_check")
-    # After the metabolic check: extinction short-circuits to END, else proceed
-    # into the dialectic via the first HITL gate.
+    # Entry: dispatch consumes the event and routes to its subgraph.
+    g.add_edge(START, "dispatch")
+    g.add_conditional_edges(
+        "dispatch", _route_event,
+        {
+            "metabolic_check": "metabolic_check",
+            "qualify_reply": "qualify_reply",
+            "book_revenue": "book_revenue",
+            "ops_event": "ops_event",
+            "escalate": "escalate",
+        },
+    )
+
+    # Metabolic path: extinction short-circuits; otherwise gate, then the
+    # dialectic runs ONLY for an ideation event (heartbeats end here).
     g.add_conditional_edges(
         "metabolic_check", _route_lifecycle,
         {"extinct": END, "continue": "gate_metabolic"},
     )
-    for i, (node_name, _, gate_name) in enumerate(_GATED_PATH):
-        if node_name != "metabolic_check":
-            g.add_edge(node_name, gate_name)  # node -> its gate
-        # gate -> next working node, or END after the last gate.
-        if i + 1 < len(_GATED_PATH):
-            g.add_edge(gate_name, _GATED_PATH[i + 1][0])
-        else:
-            g.add_edge(gate_name, END)
+    g.add_conditional_edges(
+        "gate_metabolic", _route_after_metabolic,
+        {"ideate": "visionary", "done": END},
+    )
+
+    # Dialectic chain (ideation events only).
+    g.add_edge("visionary", "gate_visionary")
+    g.add_edge("gate_visionary", "realist")
+    g.add_edge("realist", "gate_realist")
+    g.add_edge("gate_realist", "synthesizer")
+    g.add_edge("synthesizer", "gate_synthesizer")
+    g.add_edge("gate_synthesizer", END)
+
+    # Event subgraphs.
+    g.add_edge("qualify_reply", "gate_qualify")
+    g.add_edge("gate_qualify", END)
+    g.add_edge("book_revenue", "metabolic_check")  # a close re-runs metabolism
+    g.add_edge("ops_event", "gate_ops")
+    g.add_edge("gate_ops", END)
+    g.add_edge("escalate", "gate_escalate")  # gate fires the alert + interrupt
+    g.add_edge("gate_escalate", END)
 
     return g.compile(checkpointer=checkpointer)
 
@@ -473,18 +697,25 @@ app = build_graph()
 
 
 if __name__ == "__main__":
-    # Smoke test: run one full cycle on a fresh genesis state. A checkpointed
-    # graph requires a thread id. With zero revenue the metabolic router should
-    # drop to Hermes/Saving Mode and the dialectic should reach COMPLETE (no
-    # breach flags set, so every HITL gate passes straight through).
+    # Smoke test: dispatch routing on a fresh genesis state. A heartbeat (the
+    # default when no event is set) must run ONLY the metabolic path — no
+    # dialectic inference — and with zero revenue the router should drop to
+    # Hermes/Saving Mode. An ideation event then runs the full dialectic.
     from state import new_business_state
 
     genesis = new_business_state(swarm_id="genesis", creator_audit_key="0x0")
     config = {"configurable": {"thread_id": "smoke"}}
-    result = app.invoke(genesis, config)
+    result = app.invoke(genesis, config)  # event None -> heartbeat
 
+    print("-- heartbeat --")
     print("active_model      :", result["llm"]["active_model"])
     print("saving_mode_active:", result["llm"]["saving_mode_active"])
     print("metabolic_ratio   :", result["financials"]["metabolic_ratio"])
+    print("icr_stage         :", result["dialectic"]["icr_stage"], "(dialectic untouched)")
+
+    result["event"] = {"type": "ideation", "payload": {}, "received_at": None}
+    result = app.invoke(result, config)
+
+    print("-- ideation --")
     print("icr_stage         :", result["dialectic"]["icr_stage"])
     print("transcript lines  :", len(result["dialectic"]["debate_transcript"]))

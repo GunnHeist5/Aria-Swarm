@@ -6,10 +6,12 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 This repository is an empty scaffold for an **autonomous multi-agent enterprise swarm built on LangGraph**. As of this writing there is no code, no `requirements.txt`/`pyproject.toml`, and no test suite yet — the sections below describe the *target* architecture and the non-negotiable constraints any implementation must honor. Update this file as real modules, dependencies, and commands land. Do not invent commands that don't yet exist; verify the entry point and tooling before documenting them.
 
-When you add the runtime, record the real commands here (expected shape, to be confirmed when files exist):
-- Headless single-cycle run: `python main.py --cron` (hydrate last state → run one cycle → persist → sleep)
-- Unsupervised run: `python main.py --auto`
-- Interactive run: `python main.py`
+Runtime commands (the graph is **event-dispatched** — see INTEGRATION.md for the full trigger table):
+- Fire one trigger: `python main.py --event TYPE [--payload '<json>']` (hydrate → dispatch one invoke → persist → exit). Types: heartbeat, ideation, seller_reply, deal_closed, new_leads_synced, offer_accepted, wallet_low.
+- Headless metabolic tick: `python main.py --cron` (sugar for `--event heartbeat`; the systemd-timer entry point)
+- Unsupervised ideation loop: `python main.py --auto`
+- Interactive ideation loop: `python main.py --interactive`
+- Resume a HITL-frozen thread: `python resume.py <thread_id> approve|reject`
 
 ## Core Mental Model
 

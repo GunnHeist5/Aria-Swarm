@@ -43,6 +43,26 @@ MetabolicState = Literal["growth", "saving", "extinction", "replication"]
 #   sovereign_treasury -> + DeFi yield, geo fail-safe, legal wrapper
 CapitalPhase = Literal["infancy", "sustained_growth", "sovereign_treasury"]
 
+# Event triggers — the doors into the graph. Operations are event-driven;
+# the clock is reserved for what genuinely needs one:
+#   heartbeat        -> cron tick: metabolic/capital/lifecycle only (no dialectic)
+#   ideation         -> run the full Visionary->Realist->Synthesizer dialectic
+#   seller_reply     -> qualify an inbound seller response (Muffin is the sensor)
+#   deal_closed      -> book the swarm's cut of a closed deal (10% hook)
+#   new_leads_synced -> pipeline bookkeeping after a lead sync
+#   offer_accepted   -> CRITICAL_GATE: contract signing is always HITL
+#   wallet_low       -> force a saving-mode re-evaluation
+# (hitl_resume is NOT an event — it rides the LangGraph Command-resume path.)
+TriggerType = Literal[
+    "heartbeat",
+    "ideation",
+    "seller_reply",
+    "deal_closed",
+    "new_leads_synced",
+    "offer_accepted",
+    "wallet_low",
+]
+
 # The explicit active model backend string flag. Routing between premium closed
 # architectures (Claude, for Dev/Synthesizer + financial code) and open-source
 # backends (Hermes 3, for the Visionary + Saving-Mode fleet) keys off this.
@@ -214,6 +234,10 @@ class BusinessState(TypedDict):
 
     # --- Runtime / control ---
     cycle_count: int                     # Monotonic execution-cycle counter.
+    # Pending trigger for this invoke: {"type": TriggerType, "payload": dict,
+    # "received_at": iso8601}. Consumed (cleared) by the dispatch node so a
+    # hydrated snapshot can never re-fire a stale event. None => heartbeat.
+    event: Optional[dict]
     execution_mode: ExecutionMode        # "standard" (gated) or "auto" (unsupervised).
     metabolic_state: MetabolicState      # Derived Darwinian state for this cycle.
     frozen: bool                         # Hard freeze (extinction, budget=0, or HITL).
@@ -404,6 +428,7 @@ def new_business_state(
 
     return {
         "cycle_count": 0,
+        "event": None,
         "execution_mode": "standard",
         "metabolic_state": "saving",
         "frozen": True,  # fail-closed until the bootstrap daemon completes

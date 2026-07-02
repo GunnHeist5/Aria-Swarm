@@ -1,10 +1,18 @@
 """main.py — core execution harness for the autonomous swarm.
 
-Unified CLI entry point that drives the swarm's lifecycle across three modes:
+Unified CLI entry point. The swarm is event-driven: operations fire on
+triggers, and the clock is reserved for the metabolic heartbeat.
 
-  python main.py --interactive   # step through cycles, pausing for keyboard input
+  python main.py --event TYPE [--payload '<json>']   # fire one trigger, persist, exit
+  python main.py --cron          # sugar for --event heartbeat (systemd timer)
+  python main.py --interactive   # step through ideation cycles, pausing for input
   python main.py --auto          # run autonomously until budget/freeze/max-cycles
-  python main.py --cron          # run exactly one cycle, persist, exit (serverless)
+
+Event types (see ``state.TriggerType``): heartbeat, ideation, seller_reply,
+deal_closed, new_leads_synced, offer_accepted, wallet_low. Sensors (e.g.
+Muffin's Seller Response Monitor on the same box) call ``--event`` directly —
+see INTEGRATION.md. Unknown types are accepted here and fail closed in the
+graph (HITL freeze), so a sensor typo can never be silently dropped.
 
 The graph (``graph.app``) is compiled with an in-memory checkpointer, which does
 NOT survive a process restart. So this harness owns explicit JSON persistence to
@@ -20,6 +28,7 @@ import json
 import logging
 import os
 import warnings
+from datetime import datetime, timezone
 from pathlib import Path
 
 # Silence langgraph's internal msgpack deprecation notice emitted when a
@@ -136,15 +145,18 @@ def save_state(values: dict) -> None:
 # ---------------------------------------------------------------------------
 
 
-def run_one_cycle(working_state: dict) -> tuple[dict, bool]:
+def run_one_cycle(working_state: dict, event: dict | None = None) -> tuple[dict, bool]:
     """Run exactly one graph cycle on the production thread.
 
     Seeds the in-memory checkpointer from the working (disk-hydrated) state, runs
-    one START->END pass, and reads back the resulting channel values. Returns
-    ``(values, frozen)`` where ``frozen`` is True if a HITL gate interrupted.
+    one START->END pass, and reads back the resulting channel values. ``event``
+    (``{"type", "payload", "received_at"}``) selects which subgraph the dispatch
+    router wakes; ``None`` is a heartbeat. Returns ``(values, frozen)`` where
+    ``frozen`` is True if a HITL gate interrupted.
     """
 
     working_state["cycle_count"] = working_state.get("cycle_count", 0) + 1
+    working_state["event"] = event
 
     # Feed the loaded disk state into graph memory (cross-process seed), then run.
     app.update_state(CONFIG, working_state)
@@ -162,8 +174,10 @@ def print_transition(values: dict, n: int) -> None:
     """Print a one-line summary of a completed cycle."""
 
     fin = values["financials"]
+    last_event = (values["operational_flags"].get("last_event") or {}).get("type", "?")
     print(
-        f"[cycle {n}] state={values['metabolic_state']:<10} "
+        f"[cycle {n}] event={last_event:<16} "
+        f"state={values['metabolic_state']:<10} "
         f"model={values['llm']['active_model']:<16} "
         f"ratio={fin['metabolic_ratio']:.3f} "
         f"icr={values['dialectic']['icr_stage']} "
@@ -333,14 +347,24 @@ def handle_lifecycle(values: dict) -> int | None:
     return None
 
 
-def run_cron() -> int:
-    """One discrete tick: hydrate -> run one cycle -> persist -> exit."""
+def run_event(event_type: str, payload: dict) -> int:
+    """Fire one trigger: hydrate -> dispatch one invoke -> persist -> exit.
+
+    The door every sensor uses (Muffin's monitors, webhooks, the cron timer).
+    Each firing is a discrete, durable unit of work: the dispatch router wakes
+    only the subgraph the event needs, then the snapshot is written back.
+    """
 
     working = load_state()
     bootstrap_if_needed(working)
     bootstrap_registry(working)
+    event = {
+        "type": event_type,
+        "payload": payload,
+        "received_at": datetime.now(timezone.utc).isoformat(),
+    }
     try:
-        values, frozen = run_one_cycle(working)
+        values, frozen = run_one_cycle(working, event=event)
     except Exception as exc:  # never lose state on a cycle error
         print(f"[error] cycle failed: {exc}")
         save_state(working)
@@ -355,8 +379,24 @@ def run_cron() -> int:
     return term if term is not None else 0
 
 
+def run_cron() -> int:
+    """One discrete tick — sugar for ``--event heartbeat`` (systemd timer)."""
+
+    return run_event("heartbeat", {})
+
+
+def _ideation_event() -> dict:
+    """A fresh ideation trigger — the auto/interactive loops run full dialectics."""
+
+    return {
+        "type": "ideation",
+        "payload": {},
+        "received_at": datetime.now(timezone.utc).isoformat(),
+    }
+
+
 def run_auto(max_cycles: int) -> int:
-    """Autonomous loop until budget exhausted, freeze, or max cycles."""
+    """Autonomous ideation loop until budget exhausted, freeze, or max cycles."""
 
     working = load_state()
     bootstrap_if_needed(working)
@@ -368,7 +408,7 @@ def run_auto(max_cycles: int) -> int:
             print(f"[auto] budget exhausted (auto_mode_budget_usd={budget}); halting.")
             break
         try:
-            values, frozen = run_one_cycle(working)
+            values, frozen = run_one_cycle(working, event=_ideation_event())
         except Exception as exc:
             print(f"[error] cycle failed: {exc}")
             save_state(working)
@@ -391,7 +431,7 @@ def run_auto(max_cycles: int) -> int:
 
 
 def run_interactive(max_cycles: int) -> int:
-    """Step through cycles, printing transitions and pausing for input."""
+    """Step through ideation cycles, printing transitions and pausing for input."""
 
     working = load_state()
     bootstrap_if_needed(working)
@@ -399,7 +439,7 @@ def run_interactive(max_cycles: int) -> int:
     completed = 0
     while completed < max_cycles:
         try:
-            values, frozen = run_one_cycle(working)
+            values, frozen = run_one_cycle(working, event=_ideation_event())
         except Exception as exc:
             print(f"[error] cycle failed: {exc}")
             save_state(working)
@@ -438,15 +478,29 @@ def main(argv: list[str] | None = None) -> int:
     )
     mode = parser.add_mutually_exclusive_group(required=True)
     mode.add_argument("--interactive", action="store_true",
-                      help="Step through cycles, pausing for keyboard input.")
+                      help="Step through ideation cycles, pausing for keyboard input.")
     mode.add_argument("--auto", action="store_true",
                       help="Run autonomously until budget/freeze/max-cycles.")
     mode.add_argument("--cron", action="store_true",
-                      help="Run exactly one cycle, persist, and exit.")
+                      help="Fire one heartbeat (metabolic tick), persist, and exit.")
+    mode.add_argument("--event", metavar="TYPE",
+                      help="Fire one trigger (heartbeat, ideation, seller_reply, "
+                           "deal_closed, new_leads_synced, offer_accepted, "
+                           "wallet_low), persist, and exit.")
+    parser.add_argument("--payload", default="{}",
+                        help="JSON payload for --event (default: {}).")
     parser.add_argument("--max-cycles", type=int, default=DEFAULT_MAX_CYCLES,
                         help=f"Session cycle ceiling (default {DEFAULT_MAX_CYCLES}).")
     args = parser.parse_args(argv)
 
+    if args.event:
+        try:
+            payload = json.loads(args.payload)
+        except json.JSONDecodeError as exc:
+            parser.error(f"--payload is not valid JSON: {exc}")
+        if not isinstance(payload, dict):
+            parser.error("--payload must be a JSON object")
+        return run_event(args.event, payload)
     if args.cron:
         return run_cron()
     if args.auto:
