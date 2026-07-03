@@ -34,6 +34,9 @@ independently without coordinating. Unknown event types are accepted and
 | `offer_accepted` | reply-handling flow | offer/contract details | **always freezes for HITL** — a human signs every contract |
 | `contract_signed` | human/operator, after signing | `deal_id`, optional `state` (2-letter, default TX), `signed_date` (default: today), `address`, `arv`, `offer_price`, `assignment_fee_target` | opens the **10-day dispo clock**, routes the closing by state (unreviewed state → HITL freeze), emits the Day-0 "blast" action |
 | `buyer_confirmed` | dispo flow, when earnest posts | `deal_id`, `buyer`, `earnest_posted` (bool — required true to lock) | stops the dispo clock → wire pending; no earnest = clock keeps running |
+| `venture_proposed` | swarm dialectic / operator | `venture_id`, `kind`, optional `hypothesis`, `seed_cap_usd`, `stage_budgets`, `kill_criteria` | opens a venture under graduated autonomy; cheap/proven → funds stage 1, big/critical → HITL gate. See VENTURES.md |
+| `venture_validated` | hands / metrics feed | `venture_id` + any of `signal`, `revenue_usd`, `spent_usd` | records metrics, then ticks — a gate/kill line acts immediately |
+| `venture_killed` | operator | `venture_id` | manual apoptosis — reclaims unspent capital to treasury |
 | `wallet_low` | balance monitor | none | forces a saving-mode re-evaluation |
 
 `hitl_resume` is **not** an event — resuming a frozen thread goes through

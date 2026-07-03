@@ -53,6 +53,9 @@ CapitalPhase = Literal["infancy", "sustained_growth", "sovereign_treasury"]
 #   offer_accepted   -> CRITICAL_GATE: contract signing is always HITL
 #   contract_signed  -> human signed; start the 10-day disposition clock
 #   buyer_confirmed  -> dispo buyer locked (earnest posted) -> wire pending
+#   venture_proposed -> open a new business venture (graduated-autonomy gated)
+#   venture_validated-> feed observed venture metrics (signal/revenue/spend)
+#   venture_killed   -> manually terminate a venture (apoptosis)
 #   wallet_low       -> force a saving-mode re-evaluation
 # (hitl_resume is NOT an event — it rides the LangGraph Command-resume path.)
 TriggerType = Literal[
@@ -64,6 +67,9 @@ TriggerType = Literal[
     "offer_accepted",
     "contract_signed",
     "buyer_confirmed",
+    "venture_proposed",
+    "venture_validated",
+    "venture_killed",
     "wallet_low",
 ]
 

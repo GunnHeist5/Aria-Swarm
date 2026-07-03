@@ -52,6 +52,8 @@ from state import (
 )
 from tools.hitl import dispatch_hitl_alert
 from tools.revenue import book_closed_deal
+from tools.ventures import pipeline as ventures
+from tools.ventures.genome import VentureGenome
 from tools.wholesaling import dispo
 from tools.wholesaling.closing import route_closing
 
@@ -196,6 +198,9 @@ _EVENT_ROUTES = {
     "offer_accepted": "escalate",      # contract signing = CRITICAL_GATE, always
     "contract_signed": "start_dispo",  # human signed -> open the 10-day clock
     "buyer_confirmed": "confirm_buyer",
+    "venture_proposed": "propose_venture",
+    "venture_validated": "venture_metrics",
+    "venture_killed": "kill_venture",
 }
 
 
@@ -691,6 +696,106 @@ def dispo_check_node(state: BusinessState) -> BusinessState:
     return state
 
 
+def venture_check_node(state: BusinessState) -> BusinessState:
+    """Heartbeat enforcement of the venture portfolio — apoptosis can't slip.
+
+    Runs the venture pipeline tick on every metabolic pulse: kills ventures
+    that trip their criteria (reclaiming capital to the treasury), advances
+    validated ones through their staged budgets, and records proven wins. A
+    stage that needs human approval surfaces (no freeze) — the portfolio keeps
+    running while the human decides on the one gated bet.
+    """
+
+    actions = ventures.venture_tick(state, _event_date(state))
+    if any(a["action"] in ("apoptosis", "stage_gate") for a in actions):
+        try:
+            dispatch_hitl_alert(state)
+        except Exception as exc:  # alerting is best-effort
+            logger.warning("venture alert dispatch failed: %s", exc)
+    return state
+
+
+def propose_venture_node(state: BusinessState) -> BusinessState:
+    """``venture_proposed`` — open a new venture under graduated autonomy.
+
+    Payload: ``venture_id``, ``kind`` (+ optional ``hypothesis``,
+    ``seed_cap_usd``, ``stage_budgets``, ``kill_criteria``). A big-resource or
+    critical proposal comes back ``gated`` → HITL freeze (a human funds the big
+    bet); cheap/proven proposals fund stage 1 and start validating.
+    """
+
+    payload = _last_event(state)["payload"]
+    try:
+        genome = VentureGenome(
+            kind=str(payload["kind"]),
+            hypothesis=str(payload.get("hypothesis", "")),
+            **{k: payload[k] for k in ("seed_cap_usd", "stage_budgets", "kill_criteria")
+               if k in payload},
+        )
+        result = ventures.propose_venture(
+            state, genome,
+            venture_id=str(payload["venture_id"]),
+            today=_event_date(state),
+        )
+    except (KeyError, TypeError, ValueError) as exc:
+        hitl = state["hitl"]
+        hitl["hitl_pending"] = True
+        hitl["requires_auth"] = True
+        hitl["hitl_reason"] = "malformed_event:venture_proposed"
+        state["error_log"].append(f"VENTURE_PROPOSE_FAILED: bad payload: {exc}")
+        return state
+
+    if result["status"] == "gated":
+        hitl = state["hitl"]
+        hitl["hitl_pending"] = True
+        hitl["requires_auth"] = True
+        hitl["hitl_reason"] = f"venture_gate:{result['venture_id']}"
+    return state
+
+
+def venture_metrics_node(state: BusinessState) -> BusinessState:
+    """``venture_validated`` — feed observed metrics into a venture.
+
+    Payload: ``venture_id`` + any of ``signal``, ``revenue_usd``, ``spent_usd``.
+    Then run a tick so a metric that crosses a gate (or a kill line) acts now.
+    """
+
+    payload = _last_event(state)["payload"]
+    try:
+        ventures.record_metrics(
+            state, str(payload["venture_id"]),
+            signal=payload.get("signal"),
+            revenue_usd=payload.get("revenue_usd"),
+            spent_usd=payload.get("spent_usd"),
+        )
+    except (KeyError, TypeError, ValueError) as exc:
+        hitl = state["hitl"]
+        hitl["hitl_pending"] = True
+        hitl["requires_auth"] = True
+        hitl["hitl_reason"] = "malformed_event:venture_validated"
+        state["error_log"].append(f"VENTURE_METRICS_FAILED: bad payload: {exc}")
+        return state
+    ventures.venture_tick(state, _event_date(state))
+    return state
+
+
+def kill_venture_node(state: BusinessState) -> BusinessState:
+    """``venture_killed`` — manually apoptose a venture (reclaim its capital)."""
+
+    payload = _last_event(state)["payload"]
+    try:
+        ventures.resolve_venture(
+            state, str(payload["venture_id"]), "killed", _event_date(state)
+        )
+    except (KeyError, TypeError, ValueError) as exc:
+        hitl = state["hitl"]
+        hitl["hitl_pending"] = True
+        hitl["requires_auth"] = True
+        hitl["hitl_reason"] = "malformed_event:venture_killed"
+        state["error_log"].append(f"VENTURE_KILL_FAILED: bad payload: {exc}")
+    return state
+
+
 # ---------------------------------------------------------------------------
 # HITL circuit breaker
 # ---------------------------------------------------------------------------
@@ -730,6 +835,7 @@ def hitl_gate_node(state: BusinessState) -> BusinessState:
 _NODE_GATES = {
     "metabolic_check": "gate_metabolic",
     "dispo_check": "gate_dispo",
+    "venture_check": "gate_venture",
     "visionary": "gate_visionary",
     "realist": "gate_realist",
     "synthesizer": "gate_synthesizer",
@@ -738,6 +844,9 @@ _NODE_GATES = {
     "escalate": "gate_escalate",
     "start_dispo": "gate_start_dispo",
     "confirm_buyer": "gate_confirm_buyer",
+    "propose_venture": "gate_propose_venture",
+    "venture_metrics": "gate_venture_metrics",
+    "kill_venture": "gate_kill_venture",
 }
 
 
@@ -771,6 +880,7 @@ def build_graph(checkpointer=None):
     g.add_node("dispatch", dispatch_node)
     g.add_node("metabolic_check", metabolic_check_node)
     g.add_node("dispo_check", dispo_check_node)
+    g.add_node("venture_check", venture_check_node)
     g.add_node("visionary", visionary_node)
     g.add_node("realist", realist_node)
     g.add_node("synthesizer", synthesizer_node)
@@ -780,6 +890,9 @@ def build_graph(checkpointer=None):
     g.add_node("escalate", escalate_node)
     g.add_node("start_dispo", start_dispo_node)
     g.add_node("confirm_buyer", confirm_buyer_node)
+    g.add_node("propose_venture", propose_venture_node)
+    g.add_node("venture_metrics", venture_metrics_node)
+    g.add_node("kill_venture", kill_venture_node)
     for gate_name in _NODE_GATES.values():
         g.add_node(gate_name, hitl_gate_node)
 
@@ -795,20 +908,26 @@ def build_graph(checkpointer=None):
             "escalate": "escalate",
             "start_dispo": "start_dispo",
             "confirm_buyer": "confirm_buyer",
+            "propose_venture": "propose_venture",
+            "venture_metrics": "venture_metrics",
+            "kill_venture": "kill_venture",
         },
     )
 
     # Metabolic path: extinction short-circuits; otherwise gate, then the
-    # dispo deadline check runs on EVERY tick (Day 5 can never slip), and the
-    # dialectic runs ONLY for an ideation event (heartbeats end after dispo).
+    # dispo deadline check + venture portfolio tick run on EVERY heartbeat
+    # (Day 5 and apoptosis can never slip), and the dialectic runs ONLY for an
+    # ideation event (heartbeats end after the venture check).
     g.add_conditional_edges(
         "metabolic_check", _route_lifecycle,
         {"extinct": END, "continue": "gate_metabolic"},
     )
     g.add_edge("gate_metabolic", "dispo_check")
     g.add_edge("dispo_check", "gate_dispo")
+    g.add_edge("gate_dispo", "venture_check")
+    g.add_edge("venture_check", "gate_venture")
     g.add_conditional_edges(
-        "gate_dispo", _route_after_metabolic,
+        "gate_venture", _route_after_metabolic,
         {"ideate": "visionary", "done": END},
     )
 
@@ -832,6 +951,12 @@ def build_graph(checkpointer=None):
     g.add_edge("gate_start_dispo", END)
     g.add_edge("confirm_buyer", "gate_confirm_buyer")
     g.add_edge("gate_confirm_buyer", END)
+    g.add_edge("propose_venture", "gate_propose_venture")
+    g.add_edge("gate_propose_venture", END)
+    g.add_edge("venture_metrics", "gate_venture_metrics")
+    g.add_edge("gate_venture_metrics", END)
+    g.add_edge("kill_venture", "gate_kill_venture")
+    g.add_edge("gate_kill_venture", END)
 
     return g.compile(checkpointer=checkpointer)
 
