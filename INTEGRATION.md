@@ -86,47 +86,51 @@ counts business days since confirmation; past 2 business days without the wire
 (`resolve_dispo(deal_id, "closed")` not yet fired) it emits `wire_overdue_dN`
 alarms — "follow up with the title company NOW" — one per day until resolved.
 
-## Muffin as the sensor (same VPS, no network transport)
+## Muffin as the sensor — `tools/muffin_bridge.py` (the seam)
 
-Muffin stays the operator (the hands); the swarm is the manager/brain. The
-seam is one subprocess call — add it where each Muffin script detects the
-condition. Adjust `SWARM_DIR`/python path to the real install location.
+Muffin stays the operator (the hands); the swarm is the manager/brain. They run
+on the same VPS but under **different venvs** (Muffin: hermes venv; swarm: its
+own `.venv`), so the bridge is **stdlib-only** — Muffin imports it directly and
+it shells out to the swarm's interpreter. Every call is **fire-and-forget and
+never raises into Muffin** — a swarm hiccup can't break the operator loop.
 
-### `check_seller_responses.py` → seller_reply
+Paths default to `/root/Aria-Swarm` (override via `SWARM_DIR` / `SWARM_PYTHON` /
+`SWARM_MAIN` env vars).
 
+### `check_seller_responses.py` → seller_reply (the live one)
+
+At the top of Muffin's script:
 ```python
-import json, subprocess
-
-SWARM = ["/root/Aria-Swarm/.venv/bin/python", "/root/Aria-Swarm/main.py"]
-
-def notify_swarm_of_reply(lead_id: str, reply_text: str, contact: str) -> None:
-    """Fire-and-forget: the swarm qualifies; Muffin keeps operating either way."""
-    payload = {"lead_id": lead_id, "reply_text": reply_text, "contact": contact}
-    try:
-        subprocess.run(
-            [*SWARM, "--event", "seller_reply", "--payload", json.dumps(payload)],
-            timeout=120, check=False,
-        )
-    except Exception as exc:
-        print(f"swarm notify failed (non-fatal): {exc}")
+import sys; sys.path.insert(0, "/root/Aria-Swarm")
+from tools.muffin_bridge import notify_seller_reply
+```
+Then where a new inbound reply is detected:
+```python
+notify_seller_reply(lead_id, reply_body, from_address)   # -> swarm qualifier
 ```
 
-### Deal close-out → deal_closed (replaces the manual `python -m tools.revenue`)
+### Other events (import the matching helper)
+```python
+from tools.muffin_bridge import (
+    notify_deal_closed, notify_leads_synced,
+    notify_contract_signed, notify_buyer_confirmed,
+)
+notify_deal_closed("D123", 12000)          # books the swarm's 10% (idempotent)
+notify_leads_synced(412)                    # pipeline bookkeeping
+notify_contract_signed("D123", state="TX")  # opens the 10-day dispo clock
+notify_buyer_confirmed("D123", "Cash LLC", earnest_posted=True)
+```
 
+### Shell-only (cron steps, no import)
 ```bash
-python /root/Aria-Swarm/main.py --event deal_closed \
-  --payload '{"deal_id": "D123", "assignment_fee_usd": 12000}'
+SWARM=/root/Aria-Swarm/.venv/bin/python
+$SWARM -m tools.muffin_bridge seller-reply --lead-id L1 --reply "..." --contact "a@b.c"
+$SWARM -m tools.muffin_bridge deal-closed  --deal-id D123 --assignment-fee 12000
+$SWARM -m tools.muffin_bridge leads-synced --count 412
 ```
 
-Booking is idempotent per `deal_id` — a retried webhook never double-counts.
-The manual CLI (`python -m tools.revenue --deal-id D123 --assignment-fee 12000`)
-still works as a fallback; both paths share the same ledger.
-
-### Lead sync → new_leads_synced
-
-```bash
-python /root/Aria-Swarm/main.py --event new_leads_synced --payload '{"count": 412}'
-```
+Booking is idempotent per `deal_id`; the manual `python -m tools.revenue ...`
+still works as a fallback (same ledger).
 
 ## Exit codes
 
