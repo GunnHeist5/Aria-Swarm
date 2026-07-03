@@ -102,6 +102,47 @@ def dispo_day(record: dict, today: date) -> int:
     return (today - date.fromisoformat(record["signed"])).days
 
 
+def _business_days_between(start: date, end: date) -> int:
+    """Business days elapsed in (start, end] — weekends excluded."""
+
+    days = 0
+    cursor = start
+    while cursor < end:
+        cursor = date.fromordinal(cursor.toordinal() + 1)
+        if cursor.weekday() < 5:  # Mon-Fri
+            days += 1
+    return days
+
+
+def _wire_watchdog(state, deal_id: str, record: dict, today: date, config) -> list[dict]:
+    """Overdue-wire alarm for wire_pending deals (the closing red flag).
+
+    Past ``wire_alert_business_days`` after buyer confirmation, emit one
+    ``wire_overdue_d<N>`` action per additional business day — loud until the
+    wire lands (``resolve_dispo(..., "closed")`` silences it).
+    """
+
+    confirmed = record.get("confirmed_date")
+    if not confirmed:
+        return []
+    elapsed = _business_days_between(date.fromisoformat(confirmed), today)
+    if elapsed <= config.wire_alert_business_days:
+        return []
+
+    name = f"wire_overdue_d{elapsed}"
+    if name in record["actions_done"]:
+        return []
+    detail = (
+        f"wire not received {elapsed} business days after buyer confirmation "
+        f"(threshold {config.wire_alert_business_days}) — follow up with the "
+        f"title company NOW"
+    )
+    record["actions_done"].append(name)
+    record["log"].append(f"{today.isoformat()}: {name} — {detail}")
+    state["error_log"].append(f"DISPO_{name.upper()}: {deal_id} — {detail}")
+    return [{"deal_id": deal_id, "day": elapsed, "action": name, "detail": detail}]
+
+
 def dispo_tick(
     state: dict, today: date, config: DispoConfig = DEFAULT_DISPO_CONFIG
 ) -> list[dict]:
@@ -114,7 +155,10 @@ def dispo_tick(
 
     actions: list[dict] = []
     for deal_id, record in _records(state).items():
-        if record["phase"] not in ACTIVE_PHASES or record["phase"] == "wire_pending":
+        if record["phase"] not in ACTIVE_PHASES:
+            continue
+        if record["phase"] == "wire_pending":
+            actions.extend(_wire_watchdog(state, deal_id, record, today, config))
             continue
         day = dispo_day(record, today)
         due = []
@@ -157,9 +201,14 @@ def dispo_tick(
 
 
 def confirm_buyer(
-    state: dict, *, deal_id: str, buyer: str, earnest_posted: bool
+    state: dict, *, deal_id: str, buyer: str, earnest_posted: bool,
+    confirmed_date: str | None = None,
 ) -> dict:
-    """Record a confirmed buyer. Only earnest money makes it real."""
+    """Record a confirmed buyer. Only earnest money makes it real.
+
+    ``confirmed_date`` (ISO date) starts the wire watchdog clock — the caller
+    passes the event's date so this module stays wall-clock-free.
+    """
 
     record = _records(state).get(deal_id)
     if record is None:
@@ -174,6 +223,9 @@ def confirm_buyer(
     record["buyer"] = buyer
     record["buyer_confirmed"] = True
     record["phase"] = "wire_pending"
+    if confirmed_date:
+        date.fromisoformat(confirmed_date)  # validate
+        record["confirmed_date"] = confirmed_date
     record["log"].append(f"buyer confirmed: {buyer} (earnest posted) — wire pending")
     state["error_log"].append(
         f"DISPO_BUYER_CONFIRMED: {deal_id} — {buyer}; send wire instructions via title company"

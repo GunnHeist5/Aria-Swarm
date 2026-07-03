@@ -32,7 +32,7 @@ independently without coordinating. Unknown event types are accepted and
 | `deal_closed` | close-out step / CRM webhook | `deal_id`, `assignment_fee_usd`, optional `swarm_cut_pct` | books the swarm's cut (idempotent per `deal_id`), re-runs metabolism in the same invoke |
 | `new_leads_synced` | PropStream→Sheets sync job | free-form counts (e.g. `{"count": 412}`) | pipeline bookkeeping in `operational_flags["lead_pipeline"]` |
 | `offer_accepted` | reply-handling flow | offer/contract details | **always freezes for HITL** — a human signs every contract |
-| `contract_signed` | human/operator, after signing | `deal_id`, optional `signed_date` (default: today), `address`, `arv`, `offer_price`, `assignment_fee_target` | opens the **10-day dispo clock**; emits the Day-0 "blast all buyer platforms" action |
+| `contract_signed` | human/operator, after signing | `deal_id`, optional `state` (2-letter, default TX), `signed_date` (default: today), `address`, `arv`, `offer_price`, `assignment_fee_target` | opens the **10-day dispo clock**, routes the closing by state (unreviewed state → HITL freeze), emits the Day-0 "blast" action |
 | `buyer_confirmed` | dispo flow, when earnest posts | `deal_id`, `buyer`, `earnest_posted` (bool — required true to lock) | stops the dispo clock → wire pending; no earnest = clock keeps running |
 | `wallet_low` | balance monitor | none | forces a saving-mode re-evaluation |
 
@@ -60,6 +60,27 @@ execute the blasts, contracts, cancellations, and wires.
 `wire_pending`); interest without earnest does NOT. The timeline days and
 platform list are genome (`tools/wholesaling/dispo.DispoConfig`) — evolvable
 like every other strategy parameter.
+
+## Closing router (nationwide scale)
+
+`contract_signed` routes each deal's closing by property state through
+`tools/wholesaling/closing.py`:
+
+- **Reviewed state** (today: TX) → the deal record gets its vetted closer:
+  primary **CLOSED Title** + local backup, with the state's compliance notes
+  (TX: SB 2212 equitable-interest disclosure; promulgated premiums).
+- **Unreviewed/unknown state** → **fail-closed**: the record is kept but the
+  swarm freezes with `unreviewed_state:<XX>` — attorney-close states (GA, SC,
+  NC, ...) and restrictive-wholesaling states (OK, IL, SC) surface their
+  specific warning. No outreach/closing proceeds until a human reviews the
+  market and adds the row (`closing.review_state(...)` →
+  `operational_flags["closing_rules_overrides"]` — one row per new market, no
+  deploy).
+
+**Wire watchdog**: once a buyer is confirmed (`wire_pending`), every heartbeat
+counts business days since confirmation; past 2 business days without the wire
+(`resolve_dispo(deal_id, "closed")` not yet fired) it emits `wire_overdue_dN`
+alarms — "follow up with the title company NOW" — one per day until resolved.
 
 ## Muffin as the sensor (same VPS, no network transport)
 

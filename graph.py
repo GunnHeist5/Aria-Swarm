@@ -53,6 +53,7 @@ from state import (
 from tools.hitl import dispatch_hitl_alert
 from tools.revenue import book_closed_deal
 from tools.wholesaling import dispo
+from tools.wholesaling.closing import route_closing
 
 logger = logging.getLogger(__name__)
 
@@ -618,6 +619,30 @@ def start_dispo_node(state: BusinessState) -> BusinessState:
         return state
 
     if result["status"] == "opened":
+        # Route the closing by property state (default TX, the live market).
+        # An unreviewed/unknown state fails closed: record kept, loud HITL
+        # escalation, no invented vendor — legality gets reviewed by a human.
+        routing = route_closing(
+            str(payload.get("state") or "TX"),
+            overrides=state["operational_flags"].get("closing_rules_overrides"),
+        )
+        record = state["operational_flags"]["dispo"][deal_id]
+        record["closing"] = routing
+        if routing["status"] == "routed":
+            state["error_log"].append(
+                f"DISPO_CLOSING_ROUTED: {deal_id} [{routing['state']}] -> "
+                f"{routing['closer_type']}: {routing['vendor']} "
+                f"(backup: {routing['backup']})"
+            )
+        else:
+            hitl = state["hitl"]
+            hitl["hitl_pending"] = True
+            hitl["requires_auth"] = True
+            hitl["hitl_reason"] = f"unreviewed_state:{routing['state']}"
+            state["error_log"].append(
+                f"DISPO_CLOSING_BLOCKED: {deal_id} [{routing['state']}] — "
+                f"{routing['notes']}"
+            )
         dispo.dispo_tick(state, _event_date(state))  # emit the Day-0 blast now
     return state
 
@@ -632,6 +657,7 @@ def confirm_buyer_node(state: BusinessState) -> BusinessState:
             deal_id=str(payload["deal_id"]),
             buyer=str(payload["buyer"]),
             earnest_posted=bool(payload.get("earnest_posted", False)),
+            confirmed_date=_event_date(state).isoformat(),
         )
     except (KeyError, TypeError, ValueError) as exc:
         hitl = state["hitl"]
