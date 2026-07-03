@@ -70,6 +70,10 @@ def propose_venture(
     live = [v for v in ventures.values() if v["phase"] in LIVE_PHASES]
     if len(live) >= config.max_concurrent:
         return {"status": "held", "venture_id": venture_id, "reason": "portfolio_full"}
+    # Generalist niche diversity: don't over-concentrate in one kind — a niche
+    # that dries up would otherwise take the whole cohort down together.
+    if sum(1 for v in live if v["kind"] == genome.kind) >= config.max_per_kind:
+        return {"status": "held", "venture_id": venture_id, "reason": "kind_saturated"}
 
     stage0 = genome.stage_budgets[0]
     cost = stage0["budget_usd"]

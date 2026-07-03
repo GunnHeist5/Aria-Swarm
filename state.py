@@ -147,6 +147,9 @@ class LLMRoutingState(TypedDict):
     # Per-node overrides, e.g. {"dev_agent": "claude-3-5-sonnet",
     # "visionary": "hermes-3-70b"}. Keys are node ids; values are ActiveModel.
     node_model_overrides: dict
+    # Phenotype: runtime params adapted from live metrics WITHOUT touching the
+    # genome (temperature_scale, rationale). Recomputed each metabolic check.
+    phenotype: dict
 
 
 class EvolutionState(TypedDict):
@@ -385,6 +388,7 @@ def new_business_state(
         "saving_mode_active": False,
         "immortality_protocol_active": False,
         "node_model_overrides": {},
+        "phenotype": {},
     }
 
     evolution: EvolutionState = {

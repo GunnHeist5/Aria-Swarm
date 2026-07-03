@@ -59,6 +59,7 @@ class PortfolioConfig:
     """Genome for portfolio behavior — the r/K reproductive strategy."""
 
     max_concurrent: int = 5            # how many live bets at once
+    max_per_kind: int = 2              # cap live bets of one kind (niche diversity)
     big_resource_fraction: float = 0.20  # cost/treasury >= this -> human gate (A)
     proven_threshold: float = 3.0      # proven_score >= this -> full autonomy (C)
     r_bet_cap_usd: float = 5.0         # a "cheap experiment" ceiling

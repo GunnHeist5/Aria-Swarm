@@ -95,6 +95,33 @@ HARD RULES (violating these kills the gene):
 {prompt_b}
 --- END ---"""
 
+# Stochastic drift: a random mutation direction, so evolution explores logic
+# structures a directed rewrite would never try. The Red Queen still gatekeeps,
+# so unfit drift dies cheap — this only widens the search, never lowers the bar.
+MUTATION_STRATEGIES = (
+    "invert a core assumption in the prompt and follow the consequence through",
+    "add one hard, specific constraint that a naive version would omit",
+    "amplify the single strongest rule and make it non-negotiable",
+    "prune redundant instructions to sharpen the signal",
+    "tighten the output contract so the response is harder to malform",
+    "introduce an explicit failure-mode check the prompt currently lacks",
+)
+
+STOCHASTIC_MUTATION_META = """\
+You are a stochastic mutation operator evolving a "{role}" agent gene. Apply
+this specific random mutation direction and nothing else:
+
+    MUTATION: {strategy}
+
+HARD RULES (violating these kills the gene):
+- Preserve every Markdown "## " section header.
+- Preserve every {{placeholder}} token EXACTLY (runtime injection slots).
+- Output ONLY the revised Markdown prompt — no preamble, no commentary.
+
+--- CURRENT GENE ---
+{prompt}
+--- END GENE ---"""
+
 
 # ---------------------------------------------------------------------------
 # LLM seam
@@ -126,6 +153,20 @@ def crossover_prompts(
     """Blend two parent genes into one offspring (Genetic Crossover)."""
 
     meta = CROSSOVER_META.format(role=role, prompt_a=prompt_a, prompt_b=prompt_b)
+    return _invoke(model, meta).strip()
+
+
+def stochastic_mutate_prompt(
+    role: str, parent_prompt: str, *, rng, model: str = SAVING_MODE_MODEL
+) -> str:
+    """Mutate a gene along a RANDOM direction (drift to escape local optima).
+
+    ``rng`` (a ``random.Random``) is injected so the strategy choice is
+    deterministic under a seed — the search is stochastic, the test is not.
+    """
+
+    strategy = rng.choice(MUTATION_STRATEGIES)
+    meta = STOCHASTIC_MUTATION_META.format(role=role, strategy=strategy, prompt=parent_prompt)
     return _invoke(model, meta).strip()
 
 
@@ -199,6 +240,8 @@ def run_red_queen_trial(
     mutate_model: str = SAVING_MODE_MODEL,
     adversary_model: str = SPECIALIST_MODEL,
     broadcast: bool = True,
+    stochastic: bool = False,
+    rng=None,
 ) -> TrialResult:
     """Evolve one role's gene against the adversary; promote a stable champion.
 
@@ -206,7 +249,16 @@ def run_red_queen_trial(
     mutates -> evaluates -> logs. Each mutant is registered with lineage back to
     the current champion. If the best mutant beats the baseline AND clears the
     stability threshold, it is cleared for production (hot-swappable genome).
+
+    ``stochastic`` alternates directed and random-drift mutation across rounds
+    (wider search to escape local optima); the promotion/stability bar is
+    unchanged, so unfit drift is still rejected. ``rng`` (injected for
+    determinism) defaults to a fresh ``random.Random`` when stochastic.
     """
+
+    if stochastic and rng is None:
+        import random
+        rng = random.Random()
 
     active = registry.get_active_plasmids(swarm_id, db_path)
     base = active.get(role)
@@ -230,7 +282,12 @@ def run_red_queen_trial(
 
     history = []
     for i in range(1, rounds + 1):
-        mutant_text = mutate_prompt(role, champ_prompt, model=mutate_model)
+        # Stochastic trials alternate directed rewrite (even rounds) with random
+        # drift (odd rounds) to widen the search; directed-only otherwise.
+        if stochastic and i % 2 == 1:
+            mutant_text = stochastic_mutate_prompt(role, champ_prompt, rng=rng, model=mutate_model)
+        else:
+            mutant_text = mutate_prompt(role, champ_prompt, model=mutate_model)
         reg = registry.register_plasmid(
             role, mutant_text, parent_id=champ_id,
             swarm_id=swarm_id, mutation_type=registry.MUTATION_POINT,

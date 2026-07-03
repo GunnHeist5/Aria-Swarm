@@ -23,13 +23,31 @@ import uuid
 from pathlib import Path
 
 import registry
-from sandbox import mutate_prompt
+from sandbox import STABILITY_THRESHOLD, adversarial_evaluate, mutate_prompt
 from state import new_business_state
 
 logger = logging.getLogger(__name__)
 
 # Fraction of the parent wallet handed to a new child at replication.
 DEFAULT_FUND_FRACTION = 0.5
+
+
+def _vet_child_gene(role: str, mutated_text: str, parent_text: str) -> tuple[str, bool]:
+    """Parental care: a child boots only on genes that survive the Red Queen.
+
+    Run the mutated gene against the adversary; if it survives and clears the
+    stability bar, the child gets the mutation. Otherwise — or if the evaluator
+    errors — the child inherits the parent's *proven* gene (fail-closed to the
+    known-good). Returns ``(chosen_text, was_vetted)``.
+    """
+
+    try:
+        verdict = adversarial_evaluate(role, mutated_text)
+        if verdict.survived and verdict.score >= STABILITY_THRESHOLD:
+            return mutated_text, True
+    except Exception as exc:  # evaluator down -> inherit the proven gene
+        logger.warning("child-gene vetting failed for %s, inheriting: %s", role, exc)
+    return parent_text, False
 
 
 # ---------------------------------------------------------------------------
@@ -70,6 +88,7 @@ def replicate(
     children_dir: Path,
     fund_fraction: float = DEFAULT_FUND_FRACTION,
     mutate: bool = True,
+    parental_care: bool = True,
 ) -> dict:
     """Spawn a mutated, funded child swarm from a surplus parent.
 
@@ -78,6 +97,11 @@ def replicate(
     child boots on it), debit the parent wallet to fund the child, record the
     child in the parent's lineage, and write the child's ``BusinessState``
     snapshot to ``children_dir`` for an independent container to hydrate.
+
+    ``parental_care`` (default on): each mutated gene is vetted by the Red Queen
+    before the child boots on it; a mutation that fails to survive is replaced by
+    the parent's proven gene, so a funded child never launches on an unvetted
+    broken mutation. Set False for the legacy always-mutate behavior.
 
     Mutates ``parent_values`` in place (wallet debit, child id, reset to growth).
     Returns a summary dict.
@@ -107,16 +131,25 @@ def replicate(
     )
     parent_genome = registry.get_active_genome(parent_id, db_path)
     mutated_roles: list[str] = []
+    vetted_roles: list[str] = []
+    inherited_roles: list[str] = []
     for role, text in parent_genome.items():
         new_text = text
         if mutate:
             try:
-                new_text = mutate_prompt(role, text)
-                if new_text != text:
-                    mutated_roles.append(role)
+                candidate = mutate_prompt(role, text)
             except Exception as exc:  # inherit unmutated rather than fail to spawn
                 logger.warning("mutation failed for %s, inheriting: %s", role, exc)
-                new_text = text
+                candidate = text
+            if candidate != text:
+                # Parental care: vet the mutation before the child boots on it.
+                if parental_care:
+                    new_text, ok = _vet_child_gene(role, candidate, text)
+                    (vetted_roles if ok else inherited_roles).append(role)
+                else:
+                    new_text = candidate
+                if new_text != text:
+                    mutated_roles.append(role)
         # Stamp the child's lineage into the gene text. This keeps each child's
         # genes uniquely hashed (and therefore child-owned, not deduped onto the
         # parent's plasmid) even when the Mutation Operator inherited the text
@@ -149,6 +182,14 @@ def replicate(
     pev["child_swarm_ids"] = sorted({*pev.get("child_swarm_ids", []), child_id})
     parent_values["metabolic_state"] = "growth"
 
+    # Maturation record: which child genes were adversary-vetted vs. inherited
+    # from the proven parent (parental care in action).
+    child["operational_flags"]["maturation"] = {
+        "parental_care": parental_care,
+        "vetted_roles": vetted_roles,
+        "inherited_roles": inherited_roles,
+    }
+
     # --- Persist the child snapshot for an independent container to hydrate ---
     # (Actual container/Akash deployment is the documented out-of-scope hook.)
     children_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
@@ -163,6 +204,8 @@ def replicate(
         "child_swarm_id": child_id,
         "funded_usdc": funding,
         "mutated_roles": mutated_roles,
+        "vetted_roles": vetted_roles,
+        "inherited_roles": inherited_roles,
         "generation": gen + 1,
         "snapshot": str(snapshot),
     }

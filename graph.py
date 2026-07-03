@@ -142,7 +142,20 @@ def _hermes_backend_config(active_model: str) -> tuple[str, str, str | None]:
 # ---------------------------------------------------------------------------
 
 
-def get_llm_backend(active_model: str) -> Any:
+def _phenotype_temperature(base: float, phenotype: dict | None) -> float:
+    """Apply the live phenotype's temperature scale to a model's base temp.
+
+    Phenotypic plasticity: the genome (prompts) is untouched; only this runtime
+    knob flexes with live metrics. ``None`` / missing scale → base unchanged.
+    Result is clamped to ``[0.0, 1.0]`` so an aggressive scale can't produce an
+    out-of-range temperature.
+    """
+
+    scale = (phenotype or {}).get("temperature_scale", 1.0)
+    return round(max(0.0, min(1.0, base * scale)), 3)
+
+
+def get_llm_backend(active_model: str, phenotype: dict | None = None) -> Any:
     """Return a chat model client for ``active_model``.
 
     Routes the premium specialist flag to ``ChatAnthropic`` and every Hermes
@@ -152,8 +165,10 @@ def get_llm_backend(active_model: str) -> Any:
     installed, and so a Saving-Mode run never imports the Claude client it
     isn't using.
 
-    API keys are read from the environment — never hardcoded. Unknown model
-    flags raise ``ValueError`` (fail closed; no silent default backend).
+    ``phenotype`` (from ``state['llm']['phenotype']``) flexes the sampling
+    temperature from live metrics without touching the genome; ``None`` keeps
+    each model's base temperature. API keys are read from the environment —
+    never hardcoded. Unknown model flags raise ``ValueError`` (fail closed).
     """
 
     if active_model == SPECIALIST_MODEL:
@@ -164,7 +179,7 @@ def get_llm_backend(active_model: str) -> Any:
         return ChatAnthropic(
             model=os.environ.get("CLAUDE_MODEL", "claude-sonnet-4-6"),
             api_key=os.environ.get("ANTHROPIC_API_KEY"),
-            temperature=0.2,
+            temperature=_phenotype_temperature(0.2, phenotype),
         )
 
     if active_model in HERMES_MODELS:
@@ -175,10 +190,38 @@ def get_llm_backend(active_model: str) -> Any:
             model=slug,
             base_url=base_url or None,
             api_key=api_key,
-            temperature=0.7,  # uncensored, exploratory brainstorming
+            temperature=_phenotype_temperature(0.7, phenotype),  # exploratory brainstorming
         )
 
     raise ValueError(f"Unknown active_model backend: {active_model!r}")
+
+
+def resolve_phenotype(state: BusinessState) -> dict:
+    """Adapt runtime sampling from live metrics — the phenotype, not the genome.
+
+    * Saving Mode → conservative (scale < 1): cheaper, more deterministic output
+      while the organism is unprofitable.
+    * Growth but a flat/declining rolling ratio → more exploration (scale > 1) to
+      break out of a local optimum.
+    * Otherwise nominal (1.0).
+
+    Returns ``{temperature_scale, rationale}``; scale clamped to ``[0.5, 1.5]``.
+    """
+
+    fin = state["financials"]
+    mstate = state["metabolic_state"]
+    ratio = fin["metabolic_ratio"]
+    rolling = fin["rolling_30d_metabolic_ratio"]
+
+    if state["llm"]["saving_mode_active"] or mstate == "saving":
+        scale, why = 0.7, "saving_mode: conservative sampling"
+    elif mstate == "growth" and rolling > 0 and ratio <= rolling * 1.02:
+        # Profitable but plateaued — turn up exploration to escape the rut.
+        scale, why = 1.3, "growth_plateau: raise exploration to escape local optimum"
+    else:
+        scale, why = 1.0, "nominal"
+
+    return {"temperature_scale": max(0.5, min(1.5, scale)), "rationale": why}
 
 
 # ---------------------------------------------------------------------------
@@ -290,6 +333,10 @@ def metabolic_check_node(state: BusinessState) -> BusinessState:
     else:
         state["llm"]["active_model"] = SPECIALIST_MODEL
         state["llm"]["saving_mode_active"] = False
+
+    # Phenotypic plasticity: flex runtime sampling from live metrics (genome
+    # untouched). Consumed by get_llm_backend on every downstream agent call.
+    state["llm"]["phenotype"] = resolve_phenotype(state)
 
     return state
 
@@ -415,7 +462,7 @@ def _run_agent(
         _freeze_prompt(state, exc.reason, exc.original or exc)
         return state
 
-    llm = get_llm_backend(model)
+    llm = get_llm_backend(model, state["llm"].get("phenotype"))
     output = _content(llm.invoke(prompt))
 
     dialectic = state["dialectic"]
@@ -495,7 +542,7 @@ def qualify_reply_node(state: BusinessState) -> BusinessState:
         _freeze_prompt(state, exc.reason, exc.original or exc)
         return state
 
-    llm = get_llm_backend(state["llm"]["active_model"])
+    llm = get_llm_backend(state["llm"]["active_model"], state["llm"].get("phenotype"))
     assessment = _content(llm.invoke(prompt))
 
     qualified = state["operational_flags"].setdefault("qualified_replies", {})
