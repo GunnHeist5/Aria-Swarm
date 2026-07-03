@@ -32,6 +32,7 @@ REQUIRED: dict[str, list[str]] = {
     ],
     "twilio": ["TWILIO_ACCOUNT_SID", "TWILIO_AUTH_TOKEN", "TWILIO_PHONE_NUMBER"],
     "instantly": ["INSTANTLY_API_KEY", "INSTANTLY_CAMPAIGN_ID"],
+    "liquid": ["LIQUID_API_KEY"],
     "propstream": ["PROPSTREAM_API_KEY"],
     "pandadoc": [
         "PANDADOC_API_KEY",
@@ -54,6 +55,9 @@ DEFAULTS: dict[str, str] = {
     "RELAYFI_API_BASE": "https://api.relayfi.com",
     # Campaign ids are not secrets; the Harris County land campaign.
     "INSTANTLY_CAMPAIGN_ID": "a49a690b-ff8a-414e-84e1-ee84558469e7",
+    # Liquid AI endpoint (not a secret; confirm the exact host on the VPS).
+    "LIQUID_BASE_URL": "https://api.liquid.ai/v1",
+    "LIQUID_MODEL_SLUG": "lfm-7b",
 }
 
 

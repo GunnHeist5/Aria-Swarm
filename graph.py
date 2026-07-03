@@ -56,6 +56,9 @@ from tools.ventures import pipeline as ventures
 from tools.ventures.genome import VentureGenome
 from tools.wholesaling import dispo
 from tools.wholesaling.closing import route_closing
+from tools.learn.distill import distill
+from tools.learn.fetch import fetch_content
+from tools.learn.route import route_insight
 
 logger = logging.getLogger(__name__)
 
@@ -67,8 +70,9 @@ logger = logging.getLogger(__name__)
 # capital-allocation phases. ~30-window half-life.
 ROLLING_RATIO_ALPHA = 0.1
 
-# Cheap open-source target the router falls back to in Saving Mode.
-SAVING_MODE_MODEL = "hermes-3-70b"
+# Cheap worker target the router falls back to in Saving Mode. Env-selectable so
+# the VPS can point Saving Mode at the Liquid LFM ("liquid-lfm") without a deploy.
+SAVING_MODE_MODEL = os.environ.get("SAVING_MODE_MODEL", "hermes-3-70b")
 # Premium specialist for sensitive synthesis / financial code.
 SPECIALIST_MODEL = "claude-3-5-sonnet"
 
@@ -81,6 +85,12 @@ TOGETHER_BASE_URL = os.environ.get(
 )
 # Self-hosted Akash endpoint for the Immortality Protocol panic-switch.
 AKASH_HERMES_BASE_URL = os.environ.get("AKASH_HERMES_BASE_URL", "")
+
+# Liquid AI — efficient LFMs (OpenAI-compatible). Cheap worker tier / edge-local
+# candidate. Host + slug env-overridable (confirm the exact API host on the VPS).
+LIQUID_BASE_URL = os.environ.get("LIQUID_BASE_URL", "https://api.liquid.ai/v1")
+LIQUID_SLUG = os.environ.get("LIQUID_MODEL_SLUG", "lfm-7b")
+LIQUID_MODELS = {"liquid-lfm"}
 
 # Hermes backend flags (validity set for fail-closed routing).
 HERMES_MODELS = {"hermes-3-70b", "hermes-3-8b", "hermes-3-akash"}
@@ -193,6 +203,18 @@ def get_llm_backend(active_model: str, phenotype: dict | None = None) -> Any:
             temperature=_phenotype_temperature(0.7, phenotype),  # exploratory brainstorming
         )
 
+    if active_model in LIQUID_MODELS:
+        from langchain_openai import ChatOpenAI
+
+        # Liquid's efficient LFM via its OpenAI-compatible endpoint — the cheap
+        # worker tier / edge-local candidate (endothermy: less API-weather-dependent).
+        return ChatOpenAI(
+            model=LIQUID_SLUG,
+            base_url=LIQUID_BASE_URL or None,
+            api_key=os.environ.get("LIQUID_API_KEY"),
+            temperature=_phenotype_temperature(0.7, phenotype),
+        )
+
     raise ValueError(f"Unknown active_model backend: {active_model!r}")
 
 
@@ -244,6 +266,7 @@ _EVENT_ROUTES = {
     "venture_proposed": "propose_venture",
     "venture_validated": "venture_metrics",
     "venture_killed": "kill_venture",
+    "learning_ingested": "learn",
 }
 
 
@@ -843,6 +866,45 @@ def kill_venture_node(state: BusinessState) -> BusinessState:
     return state
 
 
+def learn_node(state: BusinessState) -> BusinessState:
+    """``learning_ingested`` — learn from a link, safely.
+
+    fetch (stub here; live VPS adapter behind the seam) → distill into a typed
+    insight → route it. The routing is fully gated: knowledge is only stored, a
+    venture idea goes through the autonomy-gated venture path, and a genome
+    tweak must survive the Red Queen AND clear the autonomy gate (structural /
+    big-% changes escalate to a human). Untrusted input never auto-mutates.
+    """
+
+    payload = _last_event(state)["payload"]
+    try:
+        content = fetch_content(str(payload["url"]))
+    except (KeyError, TypeError, ValueError) as exc:
+        hitl = state["hitl"]
+        hitl["hitl_pending"] = True
+        hitl["requires_auth"] = True
+        hitl["hitl_reason"] = "malformed_event:learning_ingested"
+        state["error_log"].append(f"LEARN_FETCH_FAILED: bad payload/url: {exc}")
+        return state
+
+    llm = get_llm_backend(state["llm"]["active_model"], state["llm"].get("phenotype"))
+    insight = distill(content, llm=llm)
+
+    # The genome-tweak path needs the mutation + adversary seams (imported here to
+    # keep sandbox's import of graph acyclic at module load).
+    from sandbox import adversarial_evaluate, mutate_prompt
+
+    def _directed_mutate(role, baseline, directive):
+        return mutate_prompt(role, f"{baseline}\n<!-- learn directive: {directive} -->")
+
+    result = route_insight(
+        state, insight, today=_event_date(state),
+        adversary=adversarial_evaluate, mutate=_directed_mutate,
+    )
+    state["operational_flags"]["last_learning"] = {"insight_kind": insight["kind"], **result}
+    return state
+
+
 # ---------------------------------------------------------------------------
 # HITL circuit breaker
 # ---------------------------------------------------------------------------
@@ -894,6 +956,7 @@ _NODE_GATES = {
     "propose_venture": "gate_propose_venture",
     "venture_metrics": "gate_venture_metrics",
     "kill_venture": "gate_kill_venture",
+    "learn": "gate_learn",
 }
 
 
@@ -940,6 +1003,7 @@ def build_graph(checkpointer=None):
     g.add_node("propose_venture", propose_venture_node)
     g.add_node("venture_metrics", venture_metrics_node)
     g.add_node("kill_venture", kill_venture_node)
+    g.add_node("learn", learn_node)
     for gate_name in _NODE_GATES.values():
         g.add_node(gate_name, hitl_gate_node)
 
@@ -958,6 +1022,7 @@ def build_graph(checkpointer=None):
             "propose_venture": "propose_venture",
             "venture_metrics": "venture_metrics",
             "kill_venture": "kill_venture",
+            "learn": "learn",
         },
     )
 
@@ -1004,6 +1069,8 @@ def build_graph(checkpointer=None):
     g.add_edge("gate_venture_metrics", END)
     g.add_edge("kill_venture", "gate_kill_venture")
     g.add_edge("gate_kill_venture", END)
+    g.add_edge("learn", "gate_learn")
+    g.add_edge("gate_learn", END)
 
     return g.compile(checkpointer=checkpointer)
 

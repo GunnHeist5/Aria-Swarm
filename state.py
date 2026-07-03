@@ -56,6 +56,7 @@ CapitalPhase = Literal["infancy", "sustained_growth", "sovereign_treasury"]
 #   venture_proposed -> open a new business venture (graduated-autonomy gated)
 #   venture_validated-> feed observed venture metrics (signal/revenue/spend)
 #   venture_killed   -> manually terminate a venture (apoptosis)
+#   learning_ingested-> learn from a link: fetch -> distill -> gated route
 #   wallet_low       -> force a saving-mode re-evaluation
 # (hitl_resume is NOT an event — it rides the LangGraph Command-resume path.)
 TriggerType = Literal[
@@ -70,6 +71,7 @@ TriggerType = Literal[
     "venture_proposed",
     "venture_validated",
     "venture_killed",
+    "learning_ingested",
     "wallet_low",
 ]
 
@@ -81,6 +83,7 @@ ActiveModel = Literal[
     "hermes-3-70b",
     "hermes-3-8b",
     "hermes-3-akash",  # self-hosted fallback for the Immortality Protocol
+    "liquid-lfm",      # Liquid AI efficient LFM — cheap tier / edge-local candidate
 ]
 
 

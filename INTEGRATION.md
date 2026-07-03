@@ -37,6 +37,7 @@ independently without coordinating. Unknown event types are accepted and
 | `venture_proposed` | swarm dialectic / operator | `venture_id`, `kind`, optional `hypothesis`, `seed_cap_usd`, `stage_budgets`, `kill_criteria` | opens a venture under graduated autonomy; cheap/proven → funds stage 1, big/critical → HITL gate. See VENTURES.md |
 | `venture_validated` | hands / metrics feed | `venture_id` + any of `signal`, `revenue_usd`, `spent_usd` | records metrics, then ticks — a gate/kill line acts immediately |
 | `venture_killed` | operator | `venture_id` | manual apoptosis — reclaims unspent capital to treasury |
+| `learning_ingested` | operator (send a link) | `url` | fetch → distill → **gated** route: knowledge stored, venture idea → gated venture path, genome tweak → Red Queen + autonomy gate. See LEARNING.md |
 | `wallet_low` | balance monitor | none | forces a saving-mode re-evaluation |
 
 `hitl_resume` is **not** an event — resuming a frozen thread goes through

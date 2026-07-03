@@ -11,7 +11,7 @@ triggers, and the clock is reserved for the metabolic heartbeat.
 Event types (see ``state.TriggerType``): heartbeat, ideation, seller_reply,
 deal_closed, new_leads_synced, offer_accepted, contract_signed,
 buyer_confirmed, venture_proposed, venture_validated, venture_killed,
-wallet_low. Sensors (e.g.
+learning_ingested, wallet_low. Sensors (e.g.
 Muffin's Seller Response Monitor on the same box) call ``--event`` directly —
 see INTEGRATION.md. Unknown types are accepted here and fail closed in the
 graph (HITL freeze), so a sensor typo can never be silently dropped.
@@ -489,8 +489,8 @@ def main(argv: list[str] | None = None) -> int:
                       help="Fire one trigger (heartbeat, ideation, seller_reply, "
                            "deal_closed, new_leads_synced, offer_accepted, "
                            "contract_signed, buyer_confirmed, venture_proposed, "
-                           "venture_validated, venture_killed, wallet_low), "
-                           "persist, and exit.")
+                           "venture_validated, venture_killed, learning_ingested, "
+                           "wallet_low), persist, and exit.")
     parser.add_argument("--payload", default="{}",
                         help="JSON payload for --event (default: {}).")
     parser.add_argument("--max-cycles", type=int, default=DEFAULT_MAX_CYCLES,
