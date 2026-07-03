@@ -51,6 +51,8 @@ CapitalPhase = Literal["infancy", "sustained_growth", "sovereign_treasury"]
 #   deal_closed      -> book the swarm's cut of a closed deal (10% hook)
 #   new_leads_synced -> pipeline bookkeeping after a lead sync
 #   offer_accepted   -> CRITICAL_GATE: contract signing is always HITL
+#   contract_signed  -> human signed; start the 10-day disposition clock
+#   buyer_confirmed  -> dispo buyer locked (earnest posted) -> wire pending
 #   wallet_low       -> force a saving-mode re-evaluation
 # (hitl_resume is NOT an event — it rides the LangGraph Command-resume path.)
 TriggerType = Literal[
@@ -60,6 +62,8 @@ TriggerType = Literal[
     "deal_closed",
     "new_leads_synced",
     "offer_accepted",
+    "contract_signed",
+    "buyer_confirmed",
     "wallet_low",
 ]
 

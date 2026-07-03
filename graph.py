@@ -5,12 +5,14 @@ router that reads ``state["event"]`` and wakes only the subgraph that trigger
 needs — operations are event-driven, and the clock is reserved for the
 metabolic heartbeat.
 
-  START -> dispatch ─┬─ heartbeat/wallet_low -> metabolic_check -> END
-                     ├─ ideation     -> metabolic_check -> visionary -> realist
-                     │                                     -> synthesizer -> END
+  START -> dispatch ─┬─ heartbeat/wallet_low -> metabolic_check -> dispo_check -> END
+                     ├─ ideation     -> metabolic_check -> dispo_check -> visionary
+                     │                          -> realist -> synthesizer -> END
                      ├─ seller_reply -> qualify_reply -> END
-                     ├─ deal_closed  -> book_revenue -> metabolic_check -> END
+                     ├─ deal_closed  -> book_revenue -> metabolic_check -> ...
                      ├─ new_leads_synced -> ops_event -> END
+                     ├─ contract_signed -> start_dispo (10-day clock) -> END
+                     ├─ buyer_confirmed -> confirm_buyer -> END
                      └─ offer_accepted / unknown -> escalate (HITL freeze)
 
 Three architectural mechanics live here:
@@ -50,6 +52,7 @@ from state import (
 )
 from tools.hitl import dispatch_hitl_alert
 from tools.revenue import book_closed_deal
+from tools.wholesaling import dispo
 
 logger = logging.getLogger(__name__)
 
@@ -190,6 +193,8 @@ _EVENT_ROUTES = {
     "deal_closed": "book_revenue",
     "new_leads_synced": "ops_event",
     "offer_accepted": "escalate",      # contract signing = CRITICAL_GATE, always
+    "contract_signed": "start_dispo",  # human signed -> open the 10-day clock
+    "buyer_confirmed": "confirm_buyer",
 }
 
 
@@ -565,6 +570,101 @@ def escalate_node(state: BusinessState) -> BusinessState:
     return state
 
 
+def _event_date(state: BusinessState):
+    """The invoke's reference date: the event's received_at day (else today).
+
+    Keeps the dispo clock deterministic under test (events carry injected
+    timestamps) while a live tick with no timestamp still works.
+    """
+
+    from datetime import date
+
+    received = _last_event(state).get("received_at")
+    if received:
+        try:
+            return date.fromisoformat(str(received)[:10])
+        except ValueError:
+            pass
+    return date.today()
+
+
+def start_dispo_node(state: BusinessState) -> BusinessState:
+    """``contract_signed`` — open the 10-day disposition clock.
+
+    Fired by the human/operator AFTER the HITL-gated signing that
+    ``offer_accepted`` freezes for. Runs an immediate tick so the Day-0
+    "blast all platforms" action is emitted in the same invoke.
+    """
+
+    payload = _last_event(state)["payload"]
+    try:
+        deal_id = str(payload["deal_id"])
+        signed = str(payload.get("signed_date") or _event_date(state).isoformat())
+        result = dispo.start_dispo(
+            state,
+            deal_id=deal_id,
+            contract_signed_date=signed,
+            address=payload.get("address"),
+            arv=payload.get("arv"),
+            offer_price=payload.get("offer_price"),
+            assignment_fee_target=payload.get("assignment_fee_target"),
+        )
+    except (KeyError, TypeError, ValueError) as exc:
+        hitl = state["hitl"]
+        hitl["hitl_pending"] = True
+        hitl["requires_auth"] = True
+        hitl["hitl_reason"] = "malformed_event:contract_signed"
+        state["error_log"].append(f"DISPO_OPEN_FAILED: bad contract_signed payload: {exc}")
+        return state
+
+    if result["status"] == "opened":
+        dispo.dispo_tick(state, _event_date(state))  # emit the Day-0 blast now
+    return state
+
+
+def confirm_buyer_node(state: BusinessState) -> BusinessState:
+    """``buyer_confirmed`` — lock the dispo buyer (earnest money required)."""
+
+    payload = _last_event(state)["payload"]
+    try:
+        dispo.confirm_buyer(
+            state,
+            deal_id=str(payload["deal_id"]),
+            buyer=str(payload["buyer"]),
+            earnest_posted=bool(payload.get("earnest_posted", False)),
+        )
+    except (KeyError, TypeError, ValueError) as exc:
+        hitl = state["hitl"]
+        hitl["hitl_pending"] = True
+        hitl["requires_auth"] = True
+        hitl["hitl_reason"] = "malformed_event:buyer_confirmed"
+        state["error_log"].append(f"DISPO_CONFIRM_FAILED: bad buyer_confirmed payload: {exc}")
+    return state
+
+
+def dispo_check_node(state: BusinessState) -> BusinessState:
+    """Heartbeat enforcement of the dispo deadlines — Day 5 can never slip.
+
+    Runs on every metabolic tick: evaluates all open dispo deals against the
+    timeline and surfaces due/overdue actions (loud error_log lines plus
+    ``operational_flags['dispo_actions_due']`` for the operator layer). Alerts,
+    never freezes — a dispo deadline must not paralyze reply qualification.
+    """
+
+    actions = dispo.dispo_tick(state, _event_date(state))
+    critical = [a for a in actions if a["action"] in (
+        "maxdispo_gate", "maxdispo_gate_MISSED", "decision_point", "hard_deadline",
+    )]
+    if critical:
+        # Fire the notification webhook (no interrupt): the human must act on
+        # the dispo clock, but the swarm keeps operating.
+        try:
+            dispatch_hitl_alert(state)
+        except Exception as exc:  # alerting is best-effort
+            logger.warning("dispo alert dispatch failed: %s", exc)
+    return state
+
+
 # ---------------------------------------------------------------------------
 # HITL circuit breaker
 # ---------------------------------------------------------------------------
@@ -603,12 +703,15 @@ def hitl_gate_node(state: BusinessState) -> BusinessState:
 # node freezes immediately after it.
 _NODE_GATES = {
     "metabolic_check": "gate_metabolic",
+    "dispo_check": "gate_dispo",
     "visionary": "gate_visionary",
     "realist": "gate_realist",
     "synthesizer": "gate_synthesizer",
     "qualify_reply": "gate_qualify",
     "ops_event": "gate_ops",
     "escalate": "gate_escalate",
+    "start_dispo": "gate_start_dispo",
+    "confirm_buyer": "gate_confirm_buyer",
 }
 
 
@@ -617,12 +720,15 @@ def build_graph(checkpointer=None):
 
     Topology (gates interleaved after every working node):
 
-      START -> dispatch ─┬ heartbeat/wallet_low -> metabolic_check -> gate -> END
-                         ├ ideation -> metabolic_check -> gate -> visionary ->
+      START -> dispatch ─┬ heartbeat/wallet_low -> metabolic_check -> gate ->
+                         │     dispo_check -> gate -> END
+                         ├ ideation -> (metabolic+dispo path) -> visionary ->
                          │     gate -> realist -> gate -> synthesizer -> gate -> END
                          ├ seller_reply -> qualify_reply -> gate -> END
                          ├ deal_closed -> book_revenue -> metabolic_check -> ...
                          ├ new_leads_synced -> ops_event -> gate -> END
+                         ├ contract_signed -> start_dispo -> gate -> END
+                         ├ buyer_confirmed -> confirm_buyer -> gate -> END
                          └ offer_accepted / unknown -> escalate -> gate (interrupt)
 
     Extinction short-circuits the metabolic path straight to END (a dead swarm
@@ -638,6 +744,7 @@ def build_graph(checkpointer=None):
 
     g.add_node("dispatch", dispatch_node)
     g.add_node("metabolic_check", metabolic_check_node)
+    g.add_node("dispo_check", dispo_check_node)
     g.add_node("visionary", visionary_node)
     g.add_node("realist", realist_node)
     g.add_node("synthesizer", synthesizer_node)
@@ -645,6 +752,8 @@ def build_graph(checkpointer=None):
     g.add_node("book_revenue", book_revenue_node)
     g.add_node("ops_event", ops_event_node)
     g.add_node("escalate", escalate_node)
+    g.add_node("start_dispo", start_dispo_node)
+    g.add_node("confirm_buyer", confirm_buyer_node)
     for gate_name in _NODE_GATES.values():
         g.add_node(gate_name, hitl_gate_node)
 
@@ -658,17 +767,22 @@ def build_graph(checkpointer=None):
             "book_revenue": "book_revenue",
             "ops_event": "ops_event",
             "escalate": "escalate",
+            "start_dispo": "start_dispo",
+            "confirm_buyer": "confirm_buyer",
         },
     )
 
     # Metabolic path: extinction short-circuits; otherwise gate, then the
-    # dialectic runs ONLY for an ideation event (heartbeats end here).
+    # dispo deadline check runs on EVERY tick (Day 5 can never slip), and the
+    # dialectic runs ONLY for an ideation event (heartbeats end after dispo).
     g.add_conditional_edges(
         "metabolic_check", _route_lifecycle,
         {"extinct": END, "continue": "gate_metabolic"},
     )
+    g.add_edge("gate_metabolic", "dispo_check")
+    g.add_edge("dispo_check", "gate_dispo")
     g.add_conditional_edges(
-        "gate_metabolic", _route_after_metabolic,
+        "gate_dispo", _route_after_metabolic,
         {"ideate": "visionary", "done": END},
     )
 
@@ -688,6 +802,10 @@ def build_graph(checkpointer=None):
     g.add_edge("gate_ops", END)
     g.add_edge("escalate", "gate_escalate")  # gate fires the alert + interrupt
     g.add_edge("gate_escalate", END)
+    g.add_edge("start_dispo", "gate_start_dispo")
+    g.add_edge("gate_start_dispo", END)
+    g.add_edge("confirm_buyer", "gate_confirm_buyer")
+    g.add_edge("gate_confirm_buyer", END)
 
     return g.compile(checkpointer=checkpointer)
 

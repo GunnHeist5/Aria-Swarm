@@ -32,10 +32,34 @@ independently without coordinating. Unknown event types are accepted and
 | `deal_closed` | close-out step / CRM webhook | `deal_id`, `assignment_fee_usd`, optional `swarm_cut_pct` | books the swarm's cut (idempotent per `deal_id`), re-runs metabolism in the same invoke |
 | `new_leads_synced` | PropStream→Sheets sync job | free-form counts (e.g. `{"count": 412}`) | pipeline bookkeeping in `operational_flags["lead_pipeline"]` |
 | `offer_accepted` | reply-handling flow | offer/contract details | **always freezes for HITL** — a human signs every contract |
+| `contract_signed` | human/operator, after signing | `deal_id`, optional `signed_date` (default: today), `address`, `arv`, `offer_price`, `assignment_fee_target` | opens the **10-day dispo clock**; emits the Day-0 "blast all buyer platforms" action |
+| `buyer_confirmed` | dispo flow, when earnest posts | `deal_id`, `buyer`, `earnest_posted` (bool — required true to lock) | stops the dispo clock → wire pending; no earnest = clock keeps running |
 | `wallet_low` | balance monitor | none | forces a saving-mode re-evaluation |
 
 `hitl_resume` is **not** an event — resuming a frozen thread goes through
 `python resume.py <thread_id> approve|reject` (LangGraph Command resume).
+
+## The 10-day dispo clock (heartbeat-enforced)
+
+Once `contract_signed` fires, **every heartbeat** checks the deal against the
+disposition timeline and surfaces due actions in the snapshot under
+`operational_flags.dispo_actions_due` (plus loud `error_log` lines and an alert
+webhook on the critical gates). The swarm tracks and alerts; humans/Muffin
+execute the blasts, contracts, cancellations, and wires.
+
+| Day | Action emitted | Rule |
+|---|---|---|
+| 0 | `blast` | hit all 4 buyer platforms in parallel, never sequential |
+| 1 | `followup` | re-touch every platform |
+| 3 | `escalate` | "interested buyers only — 7 days to close" |
+| 5 | `maxdispo_gate` | HARD gate: full deal package to MaxDispo (baseline bid in writing). First seen after Day 5 → `maxdispo_gate_MISSED` |
+| 9 | `decision_point` | EOD: buyer confirmed w/ earnest, or prepare cancellation |
+| 10 | `hard_deadline` | resolve or cancel via option period — phase becomes `cancel_pending` |
+
+`buyer_confirmed` with `earnest_posted: true` stops the clock (phase
+`wire_pending`); interest without earnest does NOT. The timeline days and
+platform list are genome (`tools/wholesaling/dispo.DispoConfig`) — evolvable
+like every other strategy parameter.
 
 ## Muffin as the sensor (same VPS, no network transport)
 
