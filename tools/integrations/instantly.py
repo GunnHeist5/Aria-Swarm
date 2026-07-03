@@ -18,6 +18,14 @@ CLI (run on the VPS, where INSTANTLY_API_KEY lives in .env):
   python -m tools.integrations.instantly export.xlsx              # dry-run report
   python -m tools.integrations.instantly export.xlsx --push --limit 5
   python -m tools.integrations.instantly export.xlsx --push --limit 2000
+  python -m tools.integrations.instantly export.xlsx --drift-check          # report only
+  python -m tools.integrations.instantly export.xlsx --drift-check --push   # remove drifted
+
+Drift check: MLS status is a snapshot at export time. A lead loaded while
+unlisted can list with an agent afterwards — the drift check compares the
+freshest export against who's currently in the campaign and removes any lead
+whose status flipped to listed/pending (or litigator), so the "no agents, no
+buyers" rule stays true continuously, not just at load time.
 """
 
 from __future__ import annotations
@@ -28,10 +36,20 @@ import time
 import urllib.error
 import urllib.request
 
-from .leadfile import parse_propstream, suppress
+# Auto-load ./.env so the CLI works standalone on the VPS (harmless if absent).
+try:
+    from dotenv import load_dotenv
+
+    load_dotenv()
+except ImportError:
+    pass
+
+from .leadfile import parse_propstream, suppress, suppressed_emails
 from .secrets import SecretError, get_secret
 
 API_URL = "https://api.instantly.ai/api/v2/leads"
+LIST_URL = "https://api.instantly.ai/api/v2/leads/list"
+DELETE_URL = "https://api.instantly.ai/api/v2/leads/{lead_id}"
 
 DEFAULT_LIMIT = 100
 REQUEST_SPACING_S = 0.1   # modest client-side rate limiting
@@ -45,23 +63,29 @@ def _mask_email(email: str) -> str:
     return f"{local[:1]}***@{domain}"
 
 
-def _http_post(url: str, payload: dict, api_key: str) -> tuple[int, str]:
-    """POST JSON with Bearer auth. Returns (status_code, body_text)."""
+def _http_request(method: str, url: str, payload: dict | None, api_key: str) -> tuple[int, str]:
+    """JSON request with Bearer auth. Returns (status_code, body_text)."""
 
     request = urllib.request.Request(
         url,
-        data=json.dumps(payload).encode("utf-8"),
+        data=json.dumps(payload).encode("utf-8") if payload is not None else None,
         headers={
             "Authorization": f"Bearer {api_key}",
             "Content-Type": "application/json",
         },
-        method="POST",
+        method=method,
     )
     try:
         with urllib.request.urlopen(request, timeout=30) as response:
             return response.status, response.read().decode("utf-8", "replace")
     except urllib.error.HTTPError as exc:
         return exc.code, exc.read().decode("utf-8", "replace")
+
+
+def _http_post(url: str, payload: dict, api_key: str) -> tuple[int, str]:
+    """POST JSON with Bearer auth. Returns (status_code, body_text)."""
+
+    return _http_request("POST", url, payload, api_key)
 
 
 def push_leads(
@@ -128,6 +152,113 @@ def push_leads(
     return report
 
 
+# ---------------------------------------------------------------------------
+# Drift check — keep "no agents, no buyers" true after load time
+# ---------------------------------------------------------------------------
+
+
+def fetch_campaign_leads(
+    *, api_key: str, campaign_id: str, http_request=_http_request, page_size: int = 100,
+) -> dict[str, str]:
+    """Return ``{email: lead_id}`` for every lead currently in the campaign.
+
+    Paginates the Instantly v2 list endpoint. Raises ``RuntimeError`` on an
+    auth failure (fail closed — a drift check that can't see the campaign must
+    not silently report "no drift").
+    """
+
+    leads: dict[str, str] = {}
+    starting_after = None
+    while True:
+        payload = {"campaign": campaign_id, "limit": page_size}
+        if starting_after:
+            payload["starting_after"] = starting_after
+        status, body = http_request("POST", LIST_URL, payload, api_key)
+        if status in (401, 403):
+            raise RuntimeError(f"instantly auth failed listing campaign leads (HTTP {status})")
+        if not 200 <= status < 300:
+            raise RuntimeError(f"instantly list failed (HTTP {status})")
+        data = json.loads(body or "{}")
+        items = data.get("items") or []
+        for item in items:
+            email = (item.get("email") or "").lower()
+            if email:
+                leads[email] = item.get("id", "")
+        starting_after = data.get("next_starting_after")
+        if not starting_after or not items:
+            break
+    return leads
+
+
+def drift_check(
+    rows: list[dict],
+    *,
+    api_key: str,
+    campaign_id: str,
+    dry_run: bool = True,
+    http_request=_http_request,
+    sleep=time.sleep,
+) -> dict:
+    """Remove campaign leads whose fresh export status says "has agent/buyer".
+
+    Compares the freshest export's suppression set (MLS listed/pending/
+    contingent or litigator-flagged) against who is actually in the campaign,
+    and removes the overlap. Multi-parcel owners are handled precisely: an
+    email drifts only when the owner has NO still-unlisted parcel left in the
+    export (one lot going under contract doesn't kill outreach about their
+    other, unlisted lot). Dry-run reports what WOULD be removed.
+    """
+
+    flagged = suppressed_emails(rows)
+    still_sendable = {lead["email"] for lead in suppress(rows)[0]}
+    in_campaign = fetch_campaign_leads(
+        api_key=api_key, campaign_id=campaign_id, http_request=http_request
+    )
+    drifted = sorted(set(in_campaign) & (flagged - still_sendable))
+
+    report = {
+        "campaign_id": campaign_id,
+        "dry_run": dry_run,
+        "in_campaign": len(in_campaign),
+        "flagged_in_export": len(flagged),
+        "drifted": len(drifted),
+        "removed": 0,
+        "errors": 0,
+        "drifted_masked": [_mask_email(e) for e in drifted[:10]],
+    }
+    if dry_run:
+        return report
+
+    for email in drifted:
+        lead_id = in_campaign[email]
+        status, _ = http_request(
+            "DELETE", DELETE_URL.format(lead_id=lead_id), None, api_key
+        )
+        if 200 <= status < 300:
+            report["removed"] += 1
+        else:
+            report["errors"] += 1
+            print(f"[instantly] drift remove {_mask_email(email)}: HTTP {status}")
+        sleep(REQUEST_SPACING_S)
+    return report
+
+
+def _print_drift_report(report: dict) -> None:
+    print("\n==== Instantly drift check ====")
+    print(f"campaign             : {report['campaign_id']}")
+    print(f"leads in campaign    : {report['in_campaign']}")
+    print(f"flagged in export    : {report['flagged_in_export']} (listed/pending/litigator)")
+    print(f"drifted (overlap)    : {report['drifted']}")
+    if report["drifted_masked"]:
+        print(f"  e.g.               : {', '.join(report['drifted_masked'])}")
+    if report["dry_run"]:
+        print("mode                 : DRY-RUN — use --push to remove these from the campaign")
+    else:
+        print(f"removed              : {report['removed']}")
+        print(f"errors               : {report['errors']}")
+    print("===============================\n")
+
+
 def _print_report(kept: list[dict], suppression: dict, push_report: dict) -> None:
     print("\n==== Instantly load report ====")
     print(f"export rows        : {suppression['total_rows']}")
@@ -168,20 +299,38 @@ def main(argv: list[str] | None = None) -> int:
                         help=f"Max leads this run (default {DEFAULT_LIMIT}).")
     parser.add_argument("--campaign-id", default=None,
                         help="Override INSTANTLY_CAMPAIGN_ID.")
+    parser.add_argument("--drift-check", action="store_true",
+                        help="Compare the export against the campaign and remove "
+                             "leads that are now listed/pending/litigator "
+                             "(report-only without --push).")
     args = parser.parse_args(argv)
 
     rows = parse_propstream(args.export)
     kept, suppression = suppress(rows)
 
     campaign_id = args.campaign_id or get_secret("INSTANTLY_CAMPAIGN_ID")
-    if args.push:
+    # The drift check must READ the campaign even in dry-run, so it always
+    # needs the key; a plain load only needs it when actually pushing.
+    if args.push or args.drift_check:
         try:
             api_key = get_secret("INSTANTLY_API_KEY", required=True)
         except SecretError as exc:
             print(f"[instantly] {exc}")
             return 1
     else:
-        api_key = ""  # never needed for a dry-run
+        api_key = ""  # never needed for a load dry-run
+
+    if args.drift_check:
+        try:
+            report = drift_check(
+                rows, api_key=api_key, campaign_id=campaign_id,
+                dry_run=not args.push,
+            )
+        except RuntimeError as exc:
+            print(f"[instantly] {exc}")
+            return 1
+        _print_drift_report(report)
+        return 1 if report["errors"] else 0
 
     push_report = push_leads(
         kept,

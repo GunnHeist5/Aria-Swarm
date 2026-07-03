@@ -201,3 +201,23 @@ def suppress(rows: list[dict]) -> tuple[list[dict], dict]:
 
     report["kept"] = len(kept)
     return kept, report
+
+
+def suppressed_emails(rows: list[dict]) -> set[str]:
+    """Emails whose owner now has an agent/buyer (or is litigator-flagged).
+
+    The drift check compares this set against who is already in the campaign:
+    a lead loaded while unlisted whose parcel has since gone MLS listed/pending
+    must be pulled out of the sequence. Keyed by the same first-email identity
+    used at load time, so the comparison matches 1:1.
+    """
+
+    flagged: set[str] = set()
+    for row in rows:
+        listed = (row.get("MLS Status") or "").strip().lower() in MLS_SUPPRESSED
+        litigator = (row.get("Litigator") or "").strip().lower() in ("yes", "true", "y", "1")
+        if listed or litigator:
+            email = _first_email(row)
+            if email:
+                flagged.add(email)
+    return flagged
