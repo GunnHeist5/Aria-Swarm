@@ -319,6 +319,21 @@ def _route_after_metabolic(state: BusinessState) -> str:
 # ---------------------------------------------------------------------------
 
 
+def _freeze_event(state: BusinessState, reason: str, note: str) -> None:
+    """Raise the fail-closed HITL flags for a bad/undeliverable event.
+
+    Shared by the event nodes so a malformed payload OR a well-formed event that
+    targets a nonexistent record (a typo'd deal_id/venture_id) freezes for a
+    human instead of completing silently — the gate then fires the alert.
+    """
+
+    hitl = state["hitl"]
+    hitl["hitl_pending"] = True
+    hitl["requires_auth"] = True
+    hitl["hitl_reason"] = reason
+    state["error_log"].append(note)
+
+
 def metabolic_check_node(state: BusinessState) -> BusinessState:
     """Recompute the metabolic ratio and route the active model backend.
 
@@ -370,8 +385,16 @@ def _route_lifecycle(state: BusinessState) -> str:
     On extinction the cycle short-circuits straight to END — no inference is
     spent ideating for a swarm that is terminating. main.py then runs the
     graceful self-termination sequence.
+
+    Exception: if a breach flag was raised earlier in this invoke (e.g. a
+    malformed deal_closed payload on a depleted wallet), route to the gate even
+    on extinction so the HITL alert fires and the interrupt is recorded — a
+    frozen breach must never be silently swallowed by the extinction short-cut.
     """
 
+    hitl = state["hitl"]
+    if hitl["hitl_pending"] or hitl["requires_auth"]:
+        return "continue"
     return "extinct" if state["metabolic_state"] == "extinction" else "continue"
 
 
@@ -727,7 +750,7 @@ def confirm_buyer_node(state: BusinessState) -> BusinessState:
 
     payload = _last_event(state)["payload"]
     try:
-        dispo.confirm_buyer(
+        result = dispo.confirm_buyer(
             state,
             deal_id=str(payload["deal_id"]),
             buyer=str(payload["buyer"]),
@@ -735,11 +758,13 @@ def confirm_buyer_node(state: BusinessState) -> BusinessState:
             confirmed_date=_event_date(state).isoformat(),
         )
     except (KeyError, TypeError, ValueError) as exc:
-        hitl = state["hitl"]
-        hitl["hitl_pending"] = True
-        hitl["requires_auth"] = True
-        hitl["hitl_reason"] = "malformed_event:buyer_confirmed"
-        state["error_log"].append(f"DISPO_CONFIRM_FAILED: bad buyer_confirmed payload: {exc}")
+        _freeze_event(state, "malformed_event:buyer_confirmed",
+                      f"DISPO_CONFIRM_FAILED: bad buyer_confirmed payload: {exc}")
+        return state
+    if result.get("status") == "unknown_deal":
+        _freeze_event(state, f"unknown_target:buyer_confirmed:{result['deal_id']}",
+                      f"DISPO_CONFIRM_UNKNOWN: no dispo record for {result['deal_id']!r} "
+                      "— a confirmed buyer was dropped; check the deal_id")
     return state
 
 
@@ -832,18 +857,19 @@ def venture_metrics_node(state: BusinessState) -> BusinessState:
 
     payload = _last_event(state)["payload"]
     try:
-        ventures.record_metrics(
+        result = ventures.record_metrics(
             state, str(payload["venture_id"]),
             signal=payload.get("signal"),
             revenue_usd=payload.get("revenue_usd"),
             spent_usd=payload.get("spent_usd"),
         )
     except (KeyError, TypeError, ValueError) as exc:
-        hitl = state["hitl"]
-        hitl["hitl_pending"] = True
-        hitl["requires_auth"] = True
-        hitl["hitl_reason"] = "malformed_event:venture_validated"
-        state["error_log"].append(f"VENTURE_METRICS_FAILED: bad payload: {exc}")
+        _freeze_event(state, "malformed_event:venture_validated",
+                      f"VENTURE_METRICS_FAILED: bad payload: {exc}")
+        return state
+    if result.get("status") in ("unknown_venture", "invalid_metric"):
+        _freeze_event(state, f"{result['status']}:venture_validated",
+                      f"VENTURE_METRICS_REJECTED: {result} — metric not applied")
         return state
     ventures.venture_tick(state, _event_date(state))
     return state
@@ -854,15 +880,16 @@ def kill_venture_node(state: BusinessState) -> BusinessState:
 
     payload = _last_event(state)["payload"]
     try:
-        ventures.resolve_venture(
+        result = ventures.resolve_venture(
             state, str(payload["venture_id"]), "killed", _event_date(state)
         )
     except (KeyError, TypeError, ValueError) as exc:
-        hitl = state["hitl"]
-        hitl["hitl_pending"] = True
-        hitl["requires_auth"] = True
-        hitl["hitl_reason"] = "malformed_event:venture_killed"
-        state["error_log"].append(f"VENTURE_KILL_FAILED: bad payload: {exc}")
+        _freeze_event(state, "malformed_event:venture_killed",
+                      f"VENTURE_KILL_FAILED: bad payload: {exc}")
+        return state
+    if result.get("status") == "unknown_venture":
+        _freeze_event(state, f"unknown_target:venture_killed:{result['venture_id']}",
+                      f"VENTURE_KILL_UNKNOWN: no venture {result['venture_id']!r} — kill dropped")
     return state
 
 

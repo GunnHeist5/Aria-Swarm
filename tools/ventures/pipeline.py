@@ -36,12 +36,37 @@ def _treasury(state: dict) -> float:
     return state["financials"]["wallet_balance_usdc"]
 
 
+def _roll_day(state: dict, today: date) -> None:
+    """Reset the daily spend counter when the calendar day changes.
+
+    Makes ``spent_today_usdc`` a true *rolling-day* total (not a lifetime one) so
+    the 50 USDC/day cap that ``resolve_autonomy`` reads is meaningful. Called once
+    at the start of each venture invocation, before any autonomy decision.
+    """
+
+    flags = state["operational_flags"]
+    day = today.isoformat()
+    if flags.get("spend_day") != day:
+        flags["spend_day"] = day
+        state["financials"]["spent_today_usdc"] = 0.0
+
+
 def _debit(state: dict, amount: float) -> None:
+    """Debit the treasury AND accrue to the daily spend counter.
+
+    Accruing to ``spent_today_usdc`` is what makes the 50 USDC/day cap actually
+    bind on venture funding — ``resolve_autonomy`` gates on this counter, so a
+    debit that skipped it left the daily cap blind to cumulative venture spend.
+    """
+
     fin = state["financials"]
     fin["wallet_balance_usdc"] = round(fin["wallet_balance_usdc"] - amount, 6)
+    fin["spent_today_usdc"] = round(fin["spent_today_usdc"] + amount, 6)
 
 
 def _credit(state: dict, amount: float) -> None:
+    # Reclaim (apoptosis) returns capital to the wallet but does NOT undo the
+    # daily spend accrual — the spend already happened this day.
     fin = state["financials"]
     fin["wallet_balance_usdc"] = round(fin["wallet_balance_usdc"] + amount, 6)
 
@@ -63,6 +88,7 @@ def propose_venture(
       * ``duplicate`` — id already exists.
     """
 
+    _roll_day(state, today)  # refresh the daily cap counter before deciding
     ventures = _ventures(state)
     if venture_id in ventures:
         return {"status": "duplicate", "venture_id": venture_id}
@@ -141,6 +167,13 @@ def record_metrics(
     record = _ventures(state).get(venture_id)
     if record is None:
         return {"status": "unknown_venture", "venture_id": venture_id}
+    # Reject negative money numbers fail-closed: a negative spent_usd would make
+    # the apoptosis reclaim exceed the capital ever committed (minting treasury);
+    # negative revenue would corrupt the kill/proven-win logic.
+    if (revenue_usd is not None and float(revenue_usd) < 0) or \
+       (spent_usd is not None and float(spent_usd) < 0):
+        return {"status": "invalid_metric", "venture_id": venture_id,
+                "reason": "negative money value"}
     if signal is not None:
         record["signal"] = float(signal)
     if revenue_usd is not None:
@@ -153,9 +186,14 @@ def record_metrics(
 def _kill(state: dict, venture_id: str, record: dict, reason: str, today: date) -> dict:
     """Apoptosis: mark dead, reclaim unspent committed capital, record the loss."""
 
-    unspent = max(0.0, record["capital_committed_usd"] - record["capital_spent_usd"])
+    # Clamp spent to >= 0 so a stray negative can never inflate the reclaim, and
+    # zero the committed balance after reclaiming so a duplicate kill reclaims 0
+    # (idempotent — no minting the same capital twice).
+    spent = max(0.0, record["capital_spent_usd"])
+    unspent = max(0.0, record["capital_committed_usd"] - spent)
     if unspent > 0:
         _credit(state, unspent)
+    record["capital_committed_usd"] = round(spent, 6)
     record["phase"] = "dead"
     record["death_reason"] = reason
     record["reclaimed_usd"] = round(unspent, 6)
@@ -195,9 +233,15 @@ def venture_tick(
     ``operational_flags['venture_actions_due']``).
     """
 
+    _roll_day(state, today)  # refresh the daily cap counter before any funding
     actions: list[dict] = []
     for venture_id, record in _ventures(state).items():
         if record["phase"] not in LIVE_PHASES:
+            continue
+        # A gated proposal (phase 'proposed') is awaiting a human funding
+        # decision — it was never funded, so it must not be apoptosed for
+        # "no revenue" or advanced. It waits, untouched, until approved.
+        if record["phase"] == "proposed":
             continue
 
         # 1. Apoptosis first — a dying venture advances no stages.
@@ -266,6 +310,12 @@ def resolve_venture(state: dict, venture_id: str, outcome: str, today: date) -> 
     record = _ventures(state).get(venture_id)
     if record is None:
         return {"status": "unknown_venture", "venture_id": venture_id}
+    # Terminal-phase guard: a venture already dead never resolves twice (a
+    # retried venture_killed webhook must not re-credit capital or re-record a
+    # win/loss).
+    if record["phase"] == "dead":
+        return {"status": "already_terminal", "venture_id": venture_id,
+                "phase": record.get("death_reason", "dead")}
     if outcome == "killed":
         _kill(state, venture_id, record, "manual", today)
         return {"status": "killed", "venture_id": venture_id}

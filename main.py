@@ -157,6 +157,17 @@ def run_one_cycle(working_state: dict, event: dict | None = None) -> tuple[dict,
     ``frozen`` is True if a HITL gate interrupted.
     """
 
+    # Fail-closed freeze guard: a swarm carrying breach flags (HITL pending /
+    # requires_auth) or a hard freeze (extinction, budget=0) must NOT execute a
+    # working node. Because HITL gates run AFTER their node, without this check a
+    # frozen swarm would run one full node (book revenue, a paid LLM, even adopt
+    # a learned gene) per incoming event before re-freezing. Short-circuit before
+    # touching the graph; the caller persists and exits on `frozen`.
+    hitl = working_state.get("hitl", {})
+    if (working_state.get("frozen")
+            or hitl.get("hitl_pending") or hitl.get("requires_auth")):
+        return working_state, True
+
     working_state["cycle_count"] = working_state.get("cycle_count", 0) + 1
     working_state["event"] = event
 
@@ -425,6 +436,21 @@ def run_auto(max_cycles: int) -> int:
         if term is not None:
             save_state(values)
             return term
+
+        # Meter Auto Mode's budget: charge an estimated per-cycle inference cost
+        # and enforce the hard constraint — at $0, drop to Standard (permission-
+        # gated) Mode and stop the unsupervised loop. Without this the budget
+        # wall could never trip (the field was never decremented).
+        cost = _env_float("AUTO_CYCLE_COST_USD", 0.10)
+        fin = values["financials"]
+        fin["auto_mode_budget_usd"] = round(fin["auto_mode_budget_usd"] - cost, 6)
+        fin["inference_costs_usd"] = round(fin["inference_costs_usd"] + cost, 6)
+        if fin["auto_mode_budget_usd"] <= 0:
+            values["execution_mode"] = "standard"
+            print(f"[auto] budget exhausted (spent ~${fin['inference_costs_usd']:.2f}) "
+                  "-> dropping to Standard Mode; halting unsupervised loop.")
+            save_state(values)
+            return 0
         working = values  # carry forward for the next cycle
 
     print(f"[auto] stopped after {completed} cycle(s).")

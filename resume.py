@@ -7,32 +7,22 @@ then runs:
     python resume.py <thread_id> approve
     python resume.py <thread_id> reject
 
-This fetches the frozen checkpoint, clears the breach flags, records the human
-decision into the durable state history, and signals LangGraph to continue from
-exactly where it froze.
-
-IMPORTANT — checkpointer durability:
-    ``graph.build_graph`` defaults to ``MemorySaver``, which is **in-process
-    only**. A checkpoint created by a long-running daemon is NOT visible to this
-    script when run as a separate process. For genuinely out-of-band resume,
-    compile the graph with a durable checkpointer and point this script at the
-    same store, e.g.:
-
-        from langgraph.checkpoint.sqlite import SqliteSaver
-        cp = SqliteSaver.from_conn_string("swarm_checkpoints.sqlite")
-        app = build_graph(checkpointer=cp)
-
-    (Requires ``pip install langgraph-checkpoint-sqlite``.) The resume logic
-    below is identical regardless of checkpointer backend.
+The swarm runs one-process-per-event with an in-process ``MemorySaver``, so the
+LangGraph interrupt checkpoint dies with the process that created it — a fresh
+``resume.py`` process could never see it. Therefore resume operates on the
+**durable JSON snapshot** (``~/.automaton/state_snapshot.json``), which IS the
+cross-process source of truth: it clears the breach flags there and records the
+signed decision, so the very next event runs flag-free (main.run_one_cycle's
+freeze guard reads exactly these flags). ``thread_id`` is accepted for CLI
+compatibility; there is one production snapshot.
 """
 
 from __future__ import annotations
 
 import argparse
-import sys
 from datetime import datetime, timezone
 
-# Load .env before project imports (graph reads some env at import time).
+# Load .env before project imports (main reads env at import time).
 try:
     from dotenv import load_dotenv
 
@@ -40,63 +30,48 @@ try:
 except ImportError:
     pass
 
-from langgraph.types import Command
-
-from graph import app
-
 
 def resume_thread(thread_id: str, decision: str) -> int:
-    """Clear the HITL freeze on ``thread_id`` and resume the graph.
+    """Clear the HITL freeze in the durable snapshot and record the decision.
 
-    Returns a process exit code (0 on success, non-zero if there is no frozen
-    state for the thread).
+    Returns 0 on a resumed freeze, 1 if the snapshot carries no pending freeze.
     """
 
-    config = {"configurable": {"thread_id": thread_id}}
-    snapshot = app.get_state(config)
+    import main as harness  # load/save the durable snapshot
 
-    if not snapshot.values:
+    state = harness.load_state()
+    hitl = state.get("hitl", {})
+    if not (hitl.get("hitl_pending") or hitl.get("requires_auth")):
         print(
-            f"[resume] No checkpoint found for thread_id={thread_id!r}.\n"
-            "         With the default in-memory checkpointer a fresh process "
-            "cannot see another process's state — see the SqliteSaver note in "
-            "resume.py.",
-            file=sys.stderr,
+            f"[resume] thread {thread_id}: no pending HITL freeze in the snapshot "
+            "— nothing to resume."
         )
         return 1
 
-    values = snapshot.values
     ts = datetime.now(timezone.utc).isoformat()
+    prev_reason = hitl.get("hitl_reason")
 
-    # Clear the breach flags (fail-closed -> cleared only by explicit human act).
-    hitl = dict(values["hitl"])
+    # Clear the breach flags (fail-closed -> cleared only by this explicit human
+    # act) and record the signed decision. Cryptographic verification of the
+    # resume signature remains a documented TODO.
     hitl["hitl_pending"] = False
     hitl["requires_auth"] = False
     hitl["hitl_reason"] = None
-    hitl["resume_signature"] = decision  # recorded; cryptographic verify is TODO
+    hitl["pending_critical_gate_tool"] = None
+    hitl["resume_signature"] = decision
 
-    # Append the human feedback to the durable state history.
-    error_log = list(values.get("error_log", []))
-    error_log.append(f"HUMAN_FEEDBACK: {decision} @ {ts}")
-
-    op_flags = dict(values.get("operational_flags", {}))
+    state.setdefault("error_log", []).append(
+        f"HUMAN_FEEDBACK: {decision} (was: {prev_reason}) @ {ts}"
+    )
+    op_flags = state.setdefault("operational_flags", {})
     op_flags["last_hitl_decision"] = decision
     if decision == "reject":
         op_flags["hitl_rejected"] = True
 
-    app.update_state(
-        config,
-        {"hitl": hitl, "error_log": error_log, "operational_flags": op_flags},
-    )
-
-    # Signal LangGraph to continue from the frozen interrupt.
-    app.invoke(Command(resume=decision), config)
-
-    resumed = app.get_state(config)
-    status = "COMPLETE" if resumed.next == () else f"running -> next={resumed.next}"
+    harness.save_state(state)
     print(
-        f"[resume] thread_id={thread_id} decision={decision} -> {status}\n"
-        f"         flags cleared; feedback recorded at {ts}"
+        f"[resume] thread_id={thread_id} decision={decision} -> freeze cleared "
+        f"(was: {prev_reason}); the next event will run flag-free. Recorded {ts}."
     )
     return 0
 

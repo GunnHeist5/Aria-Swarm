@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 import os
 from pathlib import Path
 from typing import Any
@@ -237,6 +238,11 @@ def execute_secure_transfer(
         }
 
     # --- Fail-closed guardrails (checked BEFORE any on-chain call) ---
+    # Reject non-finite / non-positive amounts FIRST: a negative or NaN amount
+    # would slip past the bare `>` cap checks (and a negative amount would even
+    # DECREMENT spent_today, refilling the daily budget). Never clamp-and-proceed.
+    if not math.isfinite(amount_usdc) or amount_usdc <= 0:
+        return _halt("invalid_amount")
     if amount_usdc > per_call_cap:
         return _halt("per_call_cap_exceeded")
     if spent_today + amount_usdc > per_day_cap:
