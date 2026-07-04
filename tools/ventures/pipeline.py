@@ -158,6 +158,40 @@ def propose_venture(
     return {"status": "opened", "venture_id": venture_id, "mode": decision["mode"]}
 
 
+def approve_venture(
+    state: dict, venture_id: str, *, today: date,
+) -> dict:
+    """Human-approve a gated (``proposed``) venture: fund stage 1, start it.
+
+    The completion of the graduated-autonomy loop — a proposal that came back
+    ``gated`` (big/critical) waits in ``proposed`` until a human fires this. It
+    funds stage 1 explicitly (a human authorized the spend), so it bypasses the
+    autonomy resolver but still accrues to the daily counter and debits the
+    treasury exactly like an autonomous fund.
+    """
+
+    record = _ventures(state).get(venture_id)
+    if record is None:
+        return {"status": "unknown_venture", "venture_id": venture_id}
+    if record["phase"] != "proposed":
+        return {"status": "not_gated", "venture_id": venture_id, "phase": record["phase"]}
+
+    _roll_day(state, today)
+    stage0 = record["genome"]["stage_budgets"][0]
+    cost = stage0["budget_usd"]
+    _debit(state, cost)
+    record["phase"] = "validating"
+    record["autonomy"] = "human_approved"
+    record["capital_committed_usd"] = round(cost, 6)
+    record["log"].append(
+        f"{today.isoformat()}: human-approved — funded stage '{stage0['stage']}' ${cost:.2f}"
+    )
+    state["error_log"].append(
+        f"VENTURE_APPROVED: {venture_id} [{record['kind']}] funded ${cost:.2f} by human"
+    )
+    return {"status": "funded", "venture_id": venture_id, "cost_usd": cost}
+
+
 def record_metrics(
     state: dict, venture_id: str, *, signal: float | None = None,
     revenue_usd: float | None = None, spent_usd: float | None = None,

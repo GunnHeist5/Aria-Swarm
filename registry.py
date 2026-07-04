@@ -205,6 +205,9 @@ def register_plasmid(
 
     Identical (role, prompt_text) dedupes on the unique hash — a repeat call
     returns the existing row with ``deduped=True`` and never forks lineage.
+    BUT a dedupe that requests ``cleared_for_production=True`` promotes the
+    existing row: otherwise an HGT pull or a learning-adoption of a gene the
+    swarm already holds (uncleared) would be a silent no-op.
 
     Returns ``{"id", "plasmid_hash", "deduped"}``.
     """
@@ -216,7 +219,14 @@ def register_plasmid(
             "SELECT id FROM plasmids WHERE plasmid_hash = ?", (p_hash,)
         ).fetchone()
         if existing is not None:
-            return {"id": existing["id"], "plasmid_hash": p_hash, "deduped": True}
+            if cleared_for_production:
+                conn.execute(
+                    "UPDATE plasmids SET cleared_for_production = 1 WHERE plasmid_hash = ?",
+                    (p_hash,),
+                )
+                conn.commit()
+            return {"id": existing["id"], "plasmid_hash": p_hash, "deduped": True,
+                    "promoted": bool(cleared_for_production)}
 
         parent_hash = None
         if parent_id is not None:

@@ -10,8 +10,8 @@ triggers, and the clock is reserved for the metabolic heartbeat.
 
 Event types (see ``state.TriggerType``): heartbeat, ideation, seller_reply,
 deal_closed, new_leads_synced, offer_accepted, contract_signed,
-buyer_confirmed, venture_proposed, venture_validated, venture_killed,
-learning_ingested, wallet_low. Sensors (e.g.
+buyer_confirmed, venture_proposed, venture_approved, venture_validated,
+venture_killed, learning_ingested, wallet_low. Sensors (e.g.
 Muffin's Seller Response Monitor on the same box) call ``--event`` directly —
 see INTEGRATION.md. Unknown types are accepted here and fail closed in the
 graph (HITL freeze), so a sensor typo can never be silently dropped.
@@ -30,6 +30,7 @@ import json
 import logging
 import os
 import warnings
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -69,6 +70,7 @@ except Exception:  # pragma: no cover - version-tolerance shim
 
 STATE_DIR = Path("~/.automaton").expanduser()
 STATE_FILE = STATE_DIR / "state_snapshot.json"
+LOCK_FILE = STATE_DIR / ".state.lock"
 
 THREAD_ID = "swarm_production_v1"
 CONFIG = {"configurable": {"thread_id": THREAD_ID}}
@@ -76,6 +78,37 @@ CONFIG = {"configurable": {"thread_id": THREAD_ID}}
 DEFAULT_MAX_CYCLES = 5  # local session ceiling — guards against infinite loops.
 
 PLACEHOLDER_CREATOR_KEY = "0x000000000000000000000000000000000000dead"
+
+
+# ---------------------------------------------------------------------------
+# Cross-process snapshot lock
+# ---------------------------------------------------------------------------
+
+
+@contextmanager
+def state_lock():
+    """Exclusive advisory lock held across a whole load->mutate->save.
+
+    The snapshot is the single source of truth and multiple processes hit the
+    same box (systemd heartbeat, sensor webhooks, the revenue CLI). Without a
+    lock, one process's O_TRUNC save silently clobbers another's booking. This
+    serializes the read-modify-write. Degrades to a no-op where ``fcntl`` is
+    unavailable (non-Unix dev); production is Linux.
+    """
+
+    try:
+        import fcntl
+    except Exception:  # pragma: no cover - non-Unix fallback
+        yield
+        return
+    STATE_DIR.mkdir(mode=0o700, parents=True, exist_ok=True)
+    fd = os.open(LOCK_FILE, os.O_CREAT | os.O_RDWR, 0o600)
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX)
+        yield
+    finally:
+        fcntl.flock(fd, fcntl.LOCK_UN)
+        os.close(fd)
 
 
 # ---------------------------------------------------------------------------
@@ -321,6 +354,11 @@ def handle_capital(values: dict) -> None:
             f"creator dividend {result['creator_dividend']:.2f} USDC, "
             f"replication pool +{result['replication_earmark']:.2f}"
         )
+    if result.get("creator_dividend_payable", 0) > 0:
+        print(
+            f"[capital] ⚠ creator dividend shortfall carried forward: "
+            f"{result['creator_dividend_payable']:.2f} USDC owed (wallet couldn't cover)"
+        )
 
 
 def handle_lifecycle(values: dict) -> int | None:
@@ -368,28 +406,29 @@ def run_event(event_type: str, payload: dict) -> int:
     only the subgraph the event needs, then the snapshot is written back.
     """
 
-    working = load_state()
-    bootstrap_if_needed(working)
-    bootstrap_registry(working)
     event = {
         "type": event_type,
         "payload": payload,
         "received_at": datetime.now(timezone.utc).isoformat(),
     }
-    try:
-        values, frozen = run_one_cycle(working, event=event)
-    except Exception as exc:  # never lose state on a cycle error
-        print(f"[error] cycle failed: {exc}")
-        save_state(working)
-        return 1
+    with state_lock():  # serialize the whole load->invoke->save vs. other processes
+        working = load_state()
+        bootstrap_if_needed(working)
+        bootstrap_registry(working)
+        try:
+            values, frozen = run_one_cycle(working, event=event)
+        except Exception as exc:  # never lose state on a cycle error
+            print(f"[error] cycle failed: {exc}")
+            save_state(working)
+            return 1
 
-    print_transition(values, working["cycle_count"])
-    if frozen:
-        return _persist_and_exit_on_freeze(values)
-    handle_capital(values)
-    term = handle_lifecycle(values)
-    save_state(values)
-    return term if term is not None else 0
+        print_transition(values, working["cycle_count"])
+        if frozen:
+            return _persist_and_exit_on_freeze(values)
+        handle_capital(values)
+        term = handle_lifecycle(values)
+        save_state(values)
+        return term if term is not None else 0
 
 
 def run_cron() -> int:
@@ -515,8 +554,8 @@ def main(argv: list[str] | None = None) -> int:
                       help="Fire one trigger (heartbeat, ideation, seller_reply, "
                            "deal_closed, new_leads_synced, offer_accepted, "
                            "contract_signed, buyer_confirmed, venture_proposed, "
-                           "venture_validated, venture_killed, learning_ingested, "
-                           "wallet_low), persist, and exit.")
+                           "venture_approved, venture_validated, venture_killed, "
+                           "learning_ingested, wallet_low), persist, and exit.")
     parser.add_argument("--payload", default="{}",
                         help="JSON payload for --event (default: {}).")
     parser.add_argument("--max-cycles", type=int, default=DEFAULT_MAX_CYCLES,

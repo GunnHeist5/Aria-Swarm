@@ -54,6 +54,7 @@ CapitalPhase = Literal["infancy", "sustained_growth", "sovereign_treasury"]
 #   contract_signed  -> human signed; start the 10-day disposition clock
 #   buyer_confirmed  -> dispo buyer locked (earnest posted) -> wire pending
 #   venture_proposed -> open a new business venture (graduated-autonomy gated)
+#   venture_approved -> human funds a gated (proposed) venture past its gate
 #   venture_validated-> feed observed venture metrics (signal/revenue/spend)
 #   venture_killed   -> manually terminate a venture (apoptosis)
 #   learning_ingested-> learn from a link: fetch -> distill -> gated route
@@ -69,6 +70,7 @@ TriggerType = Literal[
     "contract_signed",
     "buyer_confirmed",
     "venture_proposed",
+    "venture_approved",
     "venture_validated",
     "venture_killed",
     "learning_ingested",
@@ -204,6 +206,7 @@ class CapitalState(TypedDict):
     operations_pct: float                # 1.0 in Phase 1; 0.70 in Phase 2+.
     replication_pool_usdc: float         # Capital earmarked to fund child swarms.
     creator_dividends_paid_usdc: float   # Cumulative dividends streamed to the creator.
+    creator_dividend_payable_usdc: float # Owed-but-unpaid dividend carried forward (wallet couldn't cover).
     distributed_revenue_usdc: float      # Cumulative revenue already run through allocation.
 
     # Phase 3 — Sovereign Treasury mechanisms.
@@ -422,6 +425,7 @@ def new_business_state(
         "operations_pct": 1.0,
         "replication_pool_usdc": 0.0,
         "creator_dividends_paid_usdc": 0.0,
+        "creator_dividend_payable_usdc": 0.0,
         "distributed_revenue_usdc": 0.0,
         "defi_yield_allocation_usdc": 0.0,
         "geo_failsafe_regions": [],

@@ -66,12 +66,18 @@ def apply_capital_allocation(
         creator_cut = round(revenue * CREATOR_ROYALTY_PCT, 6)
         ops_cut = round(revenue * OPERATIONS_PCT, 6)
 
-    # Stream the dividend out to the Creator Audit Key (never overdraw).
-    creator_cut = min(creator_cut, fin["wallet_balance_usdc"])
-    fin["wallet_balance_usdc"] = round(fin["wallet_balance_usdc"] - creator_cut, 6)
+    # Stream the dividend out to the Creator Audit Key (never overdraw). Any
+    # amount the wallet can't cover this window — including a balance carried
+    # from a prior shortfall — is preserved as a payable and paid down next
+    # window, so a clamp never silently shorts the creator.
+    owed = round(creator_cut + cap.get("creator_dividend_payable_usdc", 0.0), 6)
+    paid = min(owed, fin["wallet_balance_usdc"])
+    paid = round(max(0.0, paid), 6)
+    fin["wallet_balance_usdc"] = round(fin["wallet_balance_usdc"] - paid, 6)
     cap["creator_dividends_paid_usdc"] = round(
-        cap["creator_dividends_paid_usdc"] + creator_cut, 6
+        cap["creator_dividends_paid_usdc"] + paid, 6
     )
+    cap["creator_dividend_payable_usdc"] = round(owed - paid, 6)
 
     # Earmark part of retained operations capital for replication/scaling.
     repl_earmark = round(ops_cut * REPLICATION_POOL_FRACTION, 6)
@@ -91,7 +97,8 @@ def apply_capital_allocation(
     return {
         "phase": phase,
         "revenue": revenue,
-        "creator_dividend": creator_cut,
+        "creator_dividend": paid,
+        "creator_dividend_payable": cap["creator_dividend_payable_usdc"],
         "operations_retained": round(ops_cut - repl_earmark, 6),
         "replication_earmark": repl_earmark,
         "defi_yield_allocation": cap["defi_yield_allocation_usdc"],

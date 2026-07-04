@@ -92,6 +92,21 @@ LIQUID_BASE_URL = os.environ.get("LIQUID_BASE_URL", "https://api.liquid.ai/v1")
 LIQUID_SLUG = os.environ.get("LIQUID_MODEL_SLUG", "lfm-7b")
 LIQUID_MODELS = {"liquid-lfm"}
 
+# Cost accounting: an estimated per-LLM-call inference charge and a daily server
+# rent give the metabolic ratio a real cost basis (revenue / operating cost).
+# Env-overridable; defaults are placeholders until real usage metering lands.
+INFERENCE_COST_PER_CALL_USD = float(os.environ.get("INFERENCE_COST_PER_CALL_USD", "0.01"))
+SERVER_RENT_PER_DAY_USD = float(os.environ.get("SERVER_RENT_PER_DAY_USD", "1.0"))
+
+
+def _charge_inference(state: BusinessState) -> None:
+    """Accrue one LLM call's estimated cost into the metabolic denominator."""
+
+    fin = state["financials"]
+    fin["inference_costs_usd"] = round(
+        fin["inference_costs_usd"] + INFERENCE_COST_PER_CALL_USD, 6
+    )
+
 # Hermes backend flags (validity set for fail-closed routing).
 HERMES_MODELS = {"hermes-3-70b", "hermes-3-8b", "hermes-3-akash"}
 
@@ -264,6 +279,7 @@ _EVENT_ROUTES = {
     "contract_signed": "start_dispo",  # human signed -> open the 10-day clock
     "buyer_confirmed": "confirm_buyer",
     "venture_proposed": "propose_venture",
+    "venture_approved": "approve_venture",
     "venture_validated": "venture_metrics",
     "venture_killed": "kill_venture",
     "learning_ingested": "learn",
@@ -349,6 +365,19 @@ def metabolic_check_node(state: BusinessState) -> BusinessState:
     """
 
     financials = state["financials"]
+
+    # Accrue a daily server-rent charge so the swarm has a real cost basis even
+    # in cycles with no LLM calls — otherwise the cost stack stays 0 and
+    # metabolic_ratio = revenue/0 is always 0.0, freezing the whole economy in
+    # Saving Mode forever. Once per calendar day (like the daily spend reset).
+    flags = state["operational_flags"]
+    day = _event_date(state).isoformat()
+    if flags.get("rent_day") != day:
+        flags["rent_day"] = day
+        financials["server_rent_usd"] = round(
+            financials["server_rent_usd"] + SERVER_RENT_PER_DAY_USD, 6
+        )
+
     ratio = compute_metabolic_ratio(financials)
     financials["metabolic_ratio"] = ratio
 
@@ -510,6 +539,7 @@ def _run_agent(
 
     llm = get_llm_backend(model, state["llm"].get("phenotype"))
     output = _content(llm.invoke(prompt))
+    _charge_inference(state)
 
     dialectic = state["dialectic"]
     dialectic[output_key] = output
@@ -590,6 +620,7 @@ def qualify_reply_node(state: BusinessState) -> BusinessState:
 
     llm = get_llm_backend(state["llm"]["active_model"], state["llm"].get("phenotype"))
     assessment = _content(llm.invoke(prompt))
+    _charge_inference(state)
 
     qualified = state["operational_flags"].setdefault("qualified_replies", {})
     qualified[lead_id] = {
@@ -848,6 +879,28 @@ def propose_venture_node(state: BusinessState) -> BusinessState:
     return state
 
 
+def approve_venture_node(state: BusinessState) -> BusinessState:
+    """``venture_approved`` — a human funds a gated (proposed) venture.
+
+    Completes the graduated-autonomy loop: the big/critical proposal that froze
+    for review is funded and moved into validation once the human fires this.
+    """
+
+    payload = _last_event(state)["payload"]
+    try:
+        result = ventures.approve_venture(
+            state, str(payload["venture_id"]), today=_event_date(state)
+        )
+    except (KeyError, TypeError, ValueError) as exc:
+        _freeze_event(state, "malformed_event:venture_approved",
+                      f"VENTURE_APPROVE_FAILED: bad payload: {exc}")
+        return state
+    if result.get("status") in ("unknown_venture", "not_gated"):
+        _freeze_event(state, f"{result['status']}:venture_approved",
+                      f"VENTURE_APPROVE_REJECTED: {result}")
+    return state
+
+
 def venture_metrics_node(state: BusinessState) -> BusinessState:
     """``venture_validated`` — feed observed metrics into a venture.
 
@@ -916,6 +969,7 @@ def learn_node(state: BusinessState) -> BusinessState:
 
     llm = get_llm_backend(state["llm"]["active_model"], state["llm"].get("phenotype"))
     insight = distill(content, llm=llm)
+    _charge_inference(state)
 
     # The genome-tweak path needs the mutation + adversary seams (imported here to
     # keep sandbox's import of graph acyclic at module load).
@@ -981,6 +1035,7 @@ _NODE_GATES = {
     "start_dispo": "gate_start_dispo",
     "confirm_buyer": "gate_confirm_buyer",
     "propose_venture": "gate_propose_venture",
+    "approve_venture": "gate_approve_venture",
     "venture_metrics": "gate_venture_metrics",
     "kill_venture": "gate_kill_venture",
     "learn": "gate_learn",
@@ -1028,6 +1083,7 @@ def build_graph(checkpointer=None):
     g.add_node("start_dispo", start_dispo_node)
     g.add_node("confirm_buyer", confirm_buyer_node)
     g.add_node("propose_venture", propose_venture_node)
+    g.add_node("approve_venture", approve_venture_node)
     g.add_node("venture_metrics", venture_metrics_node)
     g.add_node("kill_venture", kill_venture_node)
     g.add_node("learn", learn_node)
@@ -1047,6 +1103,7 @@ def build_graph(checkpointer=None):
             "start_dispo": "start_dispo",
             "confirm_buyer": "confirm_buyer",
             "propose_venture": "propose_venture",
+            "approve_venture": "approve_venture",
             "venture_metrics": "venture_metrics",
             "kill_venture": "kill_venture",
             "learn": "learn",
@@ -1092,6 +1149,8 @@ def build_graph(checkpointer=None):
     g.add_edge("gate_confirm_buyer", END)
     g.add_edge("propose_venture", "gate_propose_venture")
     g.add_edge("gate_propose_venture", END)
+    g.add_edge("approve_venture", "gate_approve_venture")
+    g.add_edge("gate_approve_venture", END)
     g.add_edge("venture_metrics", "gate_venture_metrics")
     g.add_edge("gate_venture_metrics", END)
     g.add_edge("kill_venture", "gate_kill_venture")

@@ -90,12 +90,15 @@ def main(argv: list[str] | None = None) -> int:
     # Imported here so the module stays importable without the full harness.
     import main as harness
 
-    state = harness.load_state()
-    result = book_closed_deal(
-        state, deal_id=args.deal_id,
-        assignment_fee_usd=args.assignment_fee, swarm_cut_pct=args.cut_pct,
-    )
-    harness.save_state(state)
+    # Serialize the load->book->save against a concurrent heartbeat/event process
+    # so a booking is never clobbered by another writer's snapshot overwrite.
+    with harness.state_lock():
+        state = harness.load_state()
+        result = book_closed_deal(
+            state, deal_id=args.deal_id,
+            assignment_fee_usd=args.assignment_fee, swarm_cut_pct=args.cut_pct,
+        )
+        harness.save_state(state)
 
     if result["status"] == "duplicate":
         print(f"[revenue] deal {args.deal_id} already booked ({result['cut_usdc']:.2f} USDC) — no change.")
