@@ -29,6 +29,23 @@ OPENING_FRACTION = float(os.environ.get("DEALDESK_OPENING_FRACTION", "0.85"))
 REPAIR_DEFAULT_USD = float(os.environ.get("DEALDESK_REPAIR_DEFAULT_USD", "0"))  # land ~ 0
 MIN_VIABLE_OFFER_USD = float(os.environ.get("DEALDESK_MIN_VIABLE_OFFER_USD", "1000"))
 
+# Which valuation feeds the ceiling. On land, PropStream's "Est. Value" often
+# floats on nearby *improved* comps and runs hot, so the safe default is
+# `lower_of` — the smaller of Est. Value and county-assessed value. Options:
+#   lower_of (default) | assessed | est_value
+ARV_BASIS = os.environ.get("DEALDESK_ARV_BASIS", "lower_of").lower()
+
+# Fee model. Percentage-of-resale is the default so the fee scales with the lot:
+# a cheap lot yields a proportionally smaller fee instead of being killed by a
+# flat house-sized number. Set DEALDESK_ASSIGNMENT_FEE_PCT=0 to fall back to the
+# flat DEALDESK_ASSIGNMENT_FEE_USD (or the genome default) instead.
+ASSIGNMENT_FEE_PCT = float(os.environ.get("DEALDESK_ASSIGNMENT_FEE_PCT", "0.10"))
+
+# High-value gate: a lot whose ceiling exceeds this escalates to a human instead
+# of being negotiated unattended — a big-ticket deal is exactly the "big % of
+# resources" case the autonomy model reserves for a person. Set to 0 to disable.
+MAX_AUTONOMOUS_OFFER_USD = float(os.environ.get("DEALDESK_MAX_AUTONOMOUS_OFFER_USD", "250000"))
+
 _LISTED = {"active", "pending", "contingent"}
 
 
@@ -43,6 +60,28 @@ def _config():
     if fee:
         changes["assignment_fee_usd"] = float(fee)
     return DEFAULT_CONFIG.mutate(**changes) if changes else DEFAULT_CONFIG
+
+
+def _select_arv(record: PropertyRecord) -> float | None:
+    """Pick the valuation that feeds the ceiling, per DEALDESK_ARV_BASIS.
+
+    ``lower_of`` (default) is the conservative choice for land: never let an
+    inflated Est. Value set the ceiling when a lower assessed value exists.
+    """
+
+    est = record.est_value if (record.est_value and record.est_value > 0) else None
+    assessed = (
+        record.assessed_value
+        if (record.assessed_value and record.assessed_value > 0)
+        else None
+    )
+    if ARV_BASIS == "est_value":
+        return est or assessed
+    if ARV_BASIS == "assessed":
+        return assessed or est
+    # lower_of: the smaller of the two present values (fail-safe).
+    present = [v for v in (est, assessed) if v]
+    return min(present) if present else None
 
 
 def _round100(x: float) -> float:
@@ -90,11 +129,17 @@ def compute_offer_range(record: PropertyRecord | None) -> dict:
     if (record.mls_status or "").lower() in _LISTED:
         return _escalate("listed_with_agent", record)
 
-    arv = record.est_value or record.assessed_value
+    arv = _select_arv(record)
     if not arv or arv <= 0:
         return _escalate("no_valuation", record)
 
     config = _config()
+    # Percentage fee: a cut of the buyer-side resale (ARV × arv_multiplier), so
+    # the fee — and therefore the offer — scales down on a cheap lot instead of
+    # a flat fee zeroing it out. Fold it into the config as the effective fee.
+    if ASSIGNMENT_FEE_PCT > 0:
+        resale = arv * config.arv_multiplier
+        config = config.mutate(assignment_fee_usd=round(resale * ASSIGNMENT_FEE_PCT, 2))
     ceiling = max_offer(arv, REPAIR_DEFAULT_USD, config)
 
     # Encumbrance: if what's owed (loans + liens) meets or exceeds our ceiling,
@@ -102,6 +147,10 @@ def compute_offer_range(record: PropertyRecord | None) -> dict:
     owed = (record.open_loans_balance or 0.0) + (record.lien_amount or 0.0)
     if owed and owed >= ceiling:
         return _escalate("encumbered", record)
+
+    if MAX_AUTONOMOUS_OFFER_USD > 0 and ceiling > MAX_AUTONOMOUS_OFFER_USD:
+        # Too big to negotiate unattended — a human takes the whale.
+        return _escalate("high_value", record)
 
     if ceiling < MIN_VIABLE_OFFER_USD:
         # Formula yields nothing worth pursuing (often the flat fee vs. a cheap
