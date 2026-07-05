@@ -33,6 +33,7 @@ The financial formula is NOT re-derived here — it is owned by
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import os
@@ -605,9 +606,21 @@ def qualify_reply_node(state: BusinessState) -> BusinessState:
     event = _last_event(state)
     payload = event["payload"]
     lead_id = str(payload.get("lead_id") or "unknown")
+    reply_text = str(payload.get("reply_text") or "(empty reply)")
+    reply_hash = hashlib.sha256(reply_text.encode("utf-8")).hexdigest()[:16]
+
+    # Idempotency: Muffin's monitor re-lists the same inbox replies every cron
+    # run, so skip a lead+reply we've already assessed — no duplicate LLM spend.
+    qualified = state["operational_flags"].setdefault("qualified_replies", {})
+    prior = qualified.get(lead_id)
+    if prior and prior.get("reply_hash") == reply_hash:
+        state["error_log"].append(
+            f"SKIP: seller reply for lead {lead_id} already qualified"
+        )
+        return state
 
     ctx = _agent_context(state)
-    ctx["reply_text"] = str(payload.get("reply_text") or "(empty reply)")
+    ctx["reply_text"] = reply_text
     ctx["lead_context"] = json.dumps(
         {k: v for k, v in payload.items() if k != "reply_text"}, default=str
     )
@@ -622,9 +635,9 @@ def qualify_reply_node(state: BusinessState) -> BusinessState:
     assessment = _content(llm.invoke(prompt))
     _charge_inference(state)
 
-    qualified = state["operational_flags"].setdefault("qualified_replies", {})
     qualified[lead_id] = {
         "assessment": assessment,
+        "reply_hash": reply_hash,
         "received_at": event.get("received_at"),
         "contact": payload.get("contact"),
     }
