@@ -13,9 +13,10 @@ notify returns ``False`` and is logged, never raised.
 
 Muffin-side usage (add to e.g. check_seller_responses.py):
 
-    import sys; sys.path.insert(0, "/root/Aria-Swarm")
-    from tools.muffin_bridge import notify_seller_reply
-    notify_seller_reply(lead_id, reply_body, from_address)
+    import sys; sys.path.append("/root/Aria-Swarm")
+    from tools.muffin_bridge import notify_seller_reply, looks_automated
+    if not looks_automated(from_address):
+        notify_seller_reply(lead_id, reply_body, from_address, detach=True)
 
 Or shell-only (cron):
 
@@ -35,8 +36,31 @@ import sys
 SWARM_DIR = os.environ.get("SWARM_DIR", "/root/Aria-Swarm")
 SWARM_PYTHON = os.environ.get("SWARM_PYTHON", os.path.join(SWARM_DIR, ".venv/bin/python"))
 SWARM_MAIN = os.environ.get("SWARM_MAIN", os.path.join(SWARM_DIR, "main.py"))
+DETACH_LOG = os.environ.get(
+    "MUFFIN_BRIDGE_LOG", os.path.expanduser("~/.automaton/muffin_bridge.log")
+)
 
 DEFAULT_TIMEOUT_S = 120
+
+# Sender-address markers that mean "automated / no-reply" — mail from these
+# should never wake the qualifier (newsletters, bounces, notifications).
+_AUTOMATED_MARKERS = (
+    "noreply", "no-reply", "donotreply", "do-not-reply", "mailer-daemon",
+    "postmaster", "notification", "notifications", "bounce", "mailer@",
+    "automated@", "@google.com", "@googlemail.com", "workspace-noreply",
+)
+
+
+def looks_automated(address: str) -> bool:
+    """True if an email address looks like an automated/no-reply sender.
+
+    Muffin's inbox filter only excludes self-mail, so it still admits newsletters
+    and bounces; gate the swarm firing on this so the qualifier only sees mail
+    that plausibly came from a human seller.
+    """
+
+    a = (address or "").lower()
+    return any(marker in a for marker in _AUTOMATED_MARKERS)
 
 
 def _log(msg: str) -> None:
@@ -45,12 +69,19 @@ def _log(msg: str) -> None:
     print(f"[muffin_bridge] {msg}", file=sys.stderr)
 
 
-def fire_event(event_type: str, payload: dict, *, timeout: int = DEFAULT_TIMEOUT_S) -> bool:
-    """Fire one swarm event. Fire-and-forget; NEVER raises into Muffin.
+def fire_event(event_type: str, payload: dict, *, timeout: int = DEFAULT_TIMEOUT_S,
+               detach: bool = False) -> bool:
+    """Fire one swarm event. NEVER raises into Muffin.
 
-    Returns True on a clean (exit 0) swarm cycle, False on anything else — a
-    non-zero exit, a timeout, a missing interpreter, a serialization error. The
-    swarm persists its own state; a dropped notify simply isn't recorded.
+    ``detach=True`` is true fire-and-forget: spawn the swarm cycle in its own
+    session and return immediately (True = queued), so Muffin's loop never blocks
+    on a full LLM cycle — right for firing inside a per-message loop. The swarm
+    serializes on its own state lock, so concurrent fires can't corrupt state.
+
+    ``detach=False`` (default) waits for the cycle and returns True on a clean
+    (exit 0) run, False otherwise — right for one-shot cron steps that want a
+    real exit code. Either way the swarm persists its own state; a dropped notify
+    simply isn't recorded.
     """
 
     try:
@@ -60,6 +91,31 @@ def fire_event(event_type: str, payload: dict, *, timeout: int = DEFAULT_TIMEOUT
         return False
 
     cmd = [SWARM_PYTHON, SWARM_MAIN, "--event", event_type, "--payload", payload_json]
+
+    if detach:
+        try:
+            out = open(DETACH_LOG, "a")  # noqa: SIM115 — child inherits this fd
+        except Exception:
+            out = subprocess.DEVNULL
+        try:
+            subprocess.Popen(
+                cmd, cwd=SWARM_DIR, stdout=out, stderr=out,
+                stdin=subprocess.DEVNULL, start_new_session=True,
+            )
+            return True
+        except FileNotFoundError:
+            _log(f"swarm python not found at {SWARM_PYTHON!r} — is the venv built?")
+            return False
+        except Exception as exc:  # never let Muffin's loop die on our account
+            _log(f"swarm event {event_type} spawn failed: {exc}")
+            return False
+        finally:
+            if out is not subprocess.DEVNULL:
+                try:
+                    out.close()
+                except Exception:
+                    pass
+
     try:
         result = subprocess.run(
             cmd, timeout=timeout, cwd=SWARM_DIR,
@@ -89,12 +145,17 @@ def fire_event(event_type: str, payload: dict, *, timeout: int = DEFAULT_TIMEOUT
 # ---------------------------------------------------------------------------
 
 
-def notify_seller_reply(lead_id: str, reply_text: str, contact: str, **extra) -> bool:
-    """A seller replied — the swarm's qualifier triages it."""
+def notify_seller_reply(lead_id: str, reply_text: str, contact: str, *,
+                        detach: bool = False, **extra) -> bool:
+    """A seller replied — the swarm's qualifier triages it.
+
+    Pass ``detach=True`` when calling inside a per-message loop so Muffin doesn't
+    block on each cycle.
+    """
 
     return fire_event("seller_reply", {
         "lead_id": lead_id, "reply_text": reply_text, "contact": contact, **extra,
-    })
+    }, detach=detach)
 
 
 def notify_deal_closed(deal_id: str, assignment_fee_usd: float, *,
