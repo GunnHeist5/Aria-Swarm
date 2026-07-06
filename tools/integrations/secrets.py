@@ -17,6 +17,16 @@ from __future__ import annotations
 
 import os
 
+# Load the VPS .env so the readiness check (and any standalone caller) sees the
+# same values the running swarm does — main.py loads it too, but this module is
+# often run on its own to check what's set.
+try:
+    from dotenv import load_dotenv
+
+    load_dotenv()
+except ImportError:
+    pass
+
 # ---------------------------------------------------------------------------
 # Required env-var NAMES per integration (values live in the VPS env, not here)
 # ---------------------------------------------------------------------------
