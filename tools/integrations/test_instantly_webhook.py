@@ -97,6 +97,28 @@ def test_fail_closed_when_secret_unset():
     assert calls == []
 
 
+def test_get_probe_returns_200():
+    # Some webhook UIs validate the URL with a GET — must ack, fire nothing.
+    c, calls = _client()
+    r = c.get("/instantly/reply")
+    assert r.status_code == 200 and r.json().get("probe") is True
+    assert calls == []
+
+
+def test_empty_body_probe_acked_without_auth():
+    # Instantly's validation ping (empty/no-token body) must 200 so it can save.
+    c, calls = _client()
+    r = c.post("/instantly/reply")
+    assert r.status_code == 200
+    assert calls == []
+
+
+def test_non_reply_event_needs_no_auth():
+    c, calls = _client()
+    r = c.post("/instantly/reply", json={"event_type": "email_opened"})
+    assert r.status_code == 200 and calls == []
+
+
 if __name__ == "__main__":
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     for fn in fns:

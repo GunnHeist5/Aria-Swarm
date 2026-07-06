@@ -63,23 +63,41 @@ def health() -> dict:
     return {"ok": True, "configured": bool(os.environ.get("INSTANTLY_WEBHOOK_SECRET"))}
 
 
+@app.get("/instantly/reply")
+def instantly_reply_probe() -> dict:
+    """Reachability probe — some webhook UIs validate the URL with a GET."""
+
+    return {"ok": True, "probe": True}
+
+
 @app.post("/instantly/reply")
 async def instantly_reply(request: Request, token: str | None = None,
                           authorization: str = Header(default="")) -> dict:
-    """Instantly reply_received webhook -> swarm seller_reply (detached)."""
+    """Instantly reply_received webhook -> swarm seller_reply (detached).
 
-    if not _authorized(token, authorization):
-        raise HTTPException(status_code=401, detail="unauthorized")
+    Validation pings (empty/non-JSON body, or any non-reply event) are acked with
+    200 so Instantly can save the webhook — they don't fire anything. Auth (the
+    shared secret) is required only to actually *fire* a reply, which is the only
+    path that touches the swarm; a probe without the secret is inert.
+    """
 
     try:
         body = await request.json()
     except Exception:
-        raise HTTPException(status_code=400, detail="invalid json")
+        body = {}  # validation ping / empty body -> ack below, never 400
+
+    if not isinstance(body, dict):
+        body = {}
 
     event = str(body.get("event_type") or "")
     if event != REPLY_EVENT:
-        # Ack non-reply events so Instantly stops; we only act on replies.
-        return {"ok": True, "ignored": event or "unknown_event"}
+        # Probe or non-reply event: ack so Instantly saves the webhook; no auth
+        # needed because nothing is fired.
+        return {"ok": True, "ignored": event or "no_event"}
+
+    # Only a real reply fires the swarm -> the secret is required here.
+    if not _authorized(token, authorization):
+        raise HTTPException(status_code=401, detail="unauthorized")
 
     lead = str(body.get("lead_email") or "").strip()
     reply_text = (
