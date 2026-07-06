@@ -631,9 +631,30 @@ def qualify_reply_node(state: BusinessState) -> BusinessState:
         _freeze_prompt(state, exc.reason, exc.original or exc)
         return state
 
-    llm = get_llm_backend(state["llm"]["active_model"], state["llm"].get("phenotype"))
-    assessment = _content(llm.invoke(prompt))
-    _charge_inference(state)
+    # Revenue-critical routing: seller-reply triage gates deal flow and is
+    # financially sensitive, so it stays on the capable specialist model even in
+    # Saving Mode (a mis-qualified hot lead costs far more than the ~cent this
+    # call spends — the metabolic downgrade to a tiny worker model is wrong here).
+    # Fail closed: if the model call errors, record an escalate so the reply is
+    # handed to a human, never silently dropped (a lost seller reply is a lost lead).
+    try:
+        llm = get_llm_backend(SPECIALIST_MODEL, state["llm"].get("phenotype"))
+        assessment = _content(llm.invoke(prompt))
+        _charge_inference(state)
+    except Exception as exc:  # noqa: BLE001 — any backend failure must fail closed
+        logger.warning("qualifier model call failed for %s: %s", lead_id, exc)
+        assessment = (
+            "<qualification>\n  <verdict>invalid</verdict>\n"
+            "  <motivation>unknown</motivation>\n  <price_signal>none</price_signal>\n"
+            "  <timeline>unknown</timeline>\n  <red_flags>none</red_flags>\n"
+            "  <next_action>escalate</next_action>\n"
+            f"  <reasoning>qualifier model call failed ({type(exc).__name__}); "
+            "routed to a human so the reply is not dropped.</reasoning>\n"
+            "</qualification>"
+        )
+        state["error_log"].append(
+            f"QUALIFY_FALLBACK: model call failed for {lead_id}, recorded escalate"
+        )
 
     qualified[lead_id] = {
         "assessment": assessment,
