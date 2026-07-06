@@ -55,6 +55,14 @@ DEFAULT_LIMIT = 100
 REQUEST_SPACING_S = 0.1   # modest client-side rate limiting
 MAX_AUTH_FAILURES = 3     # consecutive 401/403 -> abort (bad key, fail closed)
 
+# Instantly's API is behind Cloudflare, which bans the default Python-urllib
+# User-Agent (HTTP 403 "error code: 1010"). Send a real browser UA so requests
+# get through to Instantly's own auth layer.
+USER_AGENT = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+)
+
 
 def _mask_email(email: str) -> str:
     """``jane.doe@host.com`` -> ``j***@host.com`` (reports stay PII-free)."""
@@ -72,6 +80,7 @@ def _http_request(method: str, url: str, payload: dict | None, api_key: str) -> 
         headers={
             "Authorization": f"Bearer {api_key}",
             "Content-Type": "application/json",
+            "User-Agent": USER_AGENT,
         },
         method=method,
     )
