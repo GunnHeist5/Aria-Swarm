@@ -97,7 +97,34 @@ never raises into Muffin** — a swarm hiccup can't break the operator loop.
 Paths default to `/root/Aria-Swarm` (override via `SWARM_DIR` / `SWARM_PYTHON` /
 `SWARM_MAIN` env vars).
 
-### `check_seller_responses.py` → seller_reply (the live one)
+### Instantly `reply_received` webhook → seller_reply (the LIVE campaign sensor)
+
+**This is the real reply source for the outreach campaign.** Cold-email replies
+land in Instantly (routed to the sending mailbox / Unibox), not in any single
+inbox — so Instantly's `reply_received` webhook, whose payload carries the full
+`reply_text` + `lead_email`, is the correct sensor. `tools/integrations/instantly_webhook.py`
+is a tiny FastAPI receiver that validates a shared secret and fires `seller_reply`
+(detached, idempotent, noise-filtered) — the same qualifier brain as the CLI seam.
+
+Run it on the VPS behind your Cloudflare tunnel (same pattern as the deal desk):
+```bash
+INSTANTLY_WEBHOOK_SECRET=<long random secret> \
+  /root/Aria-Swarm/.venv/bin/uvicorn tools.integrations.instantly_webhook:app \
+  --host 127.0.0.1 --port 8099
+```
+Then Instantly → Settings → Webhooks → **Add Webhook**:
+- **URL:** `https://<your-host>/instantly/reply?token=<INSTANTLY_WEBHOOK_SECRET>`
+- **Event:** `reply_received`
+
+The secret is required (fail-closed 401 without it); non-reply events and
+automated senders are acked-and-ignored; firing is fire-and-forget so Instantly
+gets a fast 200.
+
+### `check_seller_responses.py` → seller_reply (legacy inbox monitor — optional)
+
+> Note: this watches a single himalaya inbox, which is **not** where the Instantly
+> campaign's replies arrive. Keep it only if that inbox still receives real
+> inbound; the Instantly webhook above is the campaign sensor.
 
 At the top of Muffin's script (append to `sys.path` so nothing shadows Muffin's
 own imports; guard the import so a missing swarm repo can never break Muffin):

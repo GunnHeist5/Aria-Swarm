@@ -42,6 +42,7 @@ REQUIRED: dict[str, list[str]] = {
     ],
     "twilio": ["TWILIO_ACCOUNT_SID", "TWILIO_AUTH_TOKEN", "TWILIO_PHONE_NUMBER"],
     "instantly": ["INSTANTLY_API_KEY", "INSTANTLY_CAMPAIGN_ID"],
+    "instantly_webhook": ["INSTANTLY_WEBHOOK_SECRET"],
     "liquid": ["LIQUID_API_KEY"],
     "dealdesk": ["DEALDESK_API_KEY", "DEALDESK_EXPORT_PATH"],
     "propstream": ["PROPSTREAM_API_KEY"],
