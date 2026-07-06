@@ -99,15 +99,28 @@ Paths default to `/root/Aria-Swarm` (override via `SWARM_DIR` / `SWARM_PYTHON` /
 
 ### `check_seller_responses.py` → seller_reply (the live one)
 
-At the top of Muffin's script:
+At the top of Muffin's script (append to `sys.path` so nothing shadows Muffin's
+own imports; guard the import so a missing swarm repo can never break Muffin):
 ```python
-import sys; sys.path.insert(0, "/root/Aria-Swarm")
-from tools.muffin_bridge import notify_seller_reply
+import sys; sys.path.append("/root/Aria-Swarm")
+try:
+    from tools.muffin_bridge import notify_seller_reply
+except Exception:
+    notify_seller_reply = None
 ```
-Then where a new inbound reply is detected:
+Muffin fetches envelopes (`himalaya envelope list`) which carry no body, so pull
+the message text on demand and pass it as `reply_text`; the sender address is the
+lead key. In the loop over detected responses:
 ```python
-notify_seller_reply(lead_id, reply_body, from_address)   # -> swarm qualifier
+if notify_seller_reply:
+    from_addr = resp.get("from", {}).get("addr", "")
+    if from_addr:
+        body = get_message_body(resp.get("id")) or resp.get("subject", "")
+        notify_seller_reply(from_addr, body, from_addr)   # -> swarm qualifier
 ```
+where `get_message_body(id)` shells `himalaya message read <id>` (best-effort,
+falls back to the subject). The swarm qualifier is idempotent per lead+text, so
+re-listing the same inbox reply every cron run costs nothing.
 
 ### Other events (import the matching helper)
 ```python
