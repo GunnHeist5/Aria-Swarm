@@ -141,6 +141,41 @@ def test_format_deal_has_fields():
     assert "Jane Doe" in text and "Beulah" in text and "$9,000" in text
 
 
+def test_contracts_build_fields_muffin_names():
+    from . import contracts
+    f = contracts.build_fields({**DEAL, "city": "Houston", "zip": "77000"})
+    assert f["property_address"] == "3321 Beulah St"
+    assert f["seller_email"] == "jane@gmail.com"
+    assert f["purchase_price"] == "9000"
+    assert f["buyer_name"] == "ARIA Capital LLC"
+    assert "partner approval" in f["special_terms"]
+
+
+def test_contracts_create_and_send_ok():
+    from . import contracts
+    calls = []
+
+    def stub(method, url, payload, key):
+        calls.append((method, url))
+        if url.endswith("/documents"):
+            return 201, '{"id": "DOC9"}'
+        return 200, '{"status": "sent"}'
+
+    res = contracts.create_and_send({**DEAL, "deal_id": "D1"}, api_key="k",
+                                    template_id="tpl", http_request=stub)
+    assert res["ok"] and res["document_id"] == "DOC9"
+    assert calls[0][0] == "POST" and calls[0][1].endswith("/documents")
+    assert calls[1][1].endswith("/DOC9/send")
+
+
+def test_contracts_create_failure_reported():
+    from . import contracts
+    res = contracts.create_and_send(
+        {**DEAL, "deal_id": "D1"}, api_key="k", template_id="tpl",
+        http_request=lambda *a: (400, "bad template"))
+    assert not res["ok"] and res["status_code"] == 400
+
+
 if __name__ == "__main__":
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     for fn in fns:

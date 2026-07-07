@@ -19,17 +19,21 @@ from fastapi import APIRouter, Header, HTTPException, Request
 
 from tools.integrations.secrets import get_secret
 
-from . import notify, service
+from . import contracts, notify, service
 
 router = APIRouter()
 
 
 def _telegram():
-    return get_secret("MUFFIN_TELEGRAM_TOKEN"), get_secret("JUSTIN_TELEGRAM_CHAT_ID")
+    # Use a swarm-dedicated bot (SWARM_TELEGRAM_TOKEN) to avoid clashing with the
+    # still-running Muffin gateway; fall back to MUFFIN_TELEGRAM_TOKEN.
+    token = get_secret("SWARM_TELEGRAM_TOKEN") or get_secret("MUFFIN_TELEGRAM_TOKEN")
+    return token, get_secret("JUSTIN_TELEGRAM_CHAT_ID")
 
 
 def _pandadoc():
-    return get_secret("PANDADOC_API_KEY"), get_secret("PANDADOC_PURCHASE_TEMPLATE_ID")
+    # Reuse Muffin's proven key/template (env-first, vault fallback).
+    return contracts.resolve_api_key(), contracts.resolve_template_id()
 
 
 @router.post("/deal-agreed")

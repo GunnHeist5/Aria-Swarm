@@ -1,33 +1,61 @@
-"""tools/dealflow/contracts.py — PandaDoc: create a purchase agreement and e-sign it.
+"""tools/dealflow/contracts.py — PandaDoc purchase/assignment agreement send.
 
-On Accept, create a document from the purchase-agreement template with the deal's
-fields and send it to the seller for signature (they get an email with a sign
-link — exactly what a seller is comfortable with, and legally binding). PandaDoc's
-webhook later reports the signature back (handled in ``router.py``).
+Ports Muffin's proven integration (``/root/.hermes/muffin_pandadoc_contract.py``):
+same template, same field names, same create→send flow — so it works against the
+real PandaDoc template with zero guesswork. The only change is *where* it runs:
+inside the swarm (tested, one system) instead of a dormant Muffin script.
 
-Network is a single injectable ``http_request`` for offline testing. Live creds:
-``PANDADOC_API_KEY`` + ``PANDADOC_PURCHASE_TEMPLATE_ID``.
+Credentials, env-first with a fallback to Muffin's vault so nothing needs
+re-gathering:
+  * API key: ``PANDADOC_API_KEY`` → else ``~/.hermes/vault.json`` pandadoc key.
+  * Template: ``PANDADOC_PURCHASE_TEMPLATE_ID`` → else Muffin's known template.
 
-NOTE: field/token/role names below must match your actual PandaDoc template — tune
-them on the VPS against the real template (this is the seam, verified live like
-the other integrations).
+⚠️ That vault key was exposed earlier and is COMPROMISED — rotate it in PandaDoc
+and put the fresh key in ``.env`` as ``PANDADOC_API_KEY``; the vault fallback is
+only a stopgap so this works today.
+
+All network is a single injectable ``http_request`` for offline testing.
 """
 
 from __future__ import annotations
 
 import json
-import time
+import os
 import urllib.error
 import urllib.request
+from pathlib import Path
 
 _BASE = "https://api.pandadoc.com/public/v1"
+_VAULT = Path(os.environ.get("HERMES_VAULT", os.path.expanduser("~/.hermes/vault.json")))
+# Muffin's proven purchase/assignment template (override via env).
+_DEFAULT_TEMPLATE = "Gqk4KM3eVUAth5ABtxK5Sj"
+
+_STANDARD_TERMS = (
+    "This agreement is subject to partner approval within 5 business days. "
+    "Seller acknowledges buyer is purchasing for investment purposes and may "
+    "market the property prior to closing."
+)
 
 
-def _request(method: str, url: str, payload: dict | None, api_key: str) -> tuple[int, str]:
+def resolve_api_key() -> str:
+    key = os.environ.get("PANDADOC_API_KEY")
+    if key:
+        return key
+    try:
+        return json.loads(_VAULT.read_text()).get("pandadoc", {}).get("production_api_key", "")
+    except Exception:
+        return ""
+
+
+def resolve_template_id() -> str:
+    return os.environ.get("PANDADOC_PURCHASE_TEMPLATE_ID") or _DEFAULT_TEMPLATE
+
+
+def _request(method: str, url: str, payload: dict | None, key: str) -> tuple[int, str]:
     req = urllib.request.Request(
         url,
         data=json.dumps(payload).encode("utf-8") if payload is not None else None,
-        headers={"Authorization": f"API-Key {api_key}", "Content-Type": "application/json"},
+        headers={"Authorization": f"API-Key {key}", "Content-Type": "application/json"},
         method=method,
     )
     try:
@@ -37,55 +65,52 @@ def _request(method: str, url: str, payload: dict | None, api_key: str) -> tuple
         return exc.code, exc.read().decode("utf-8", "replace")
 
 
-def _split_name(deal: dict) -> tuple[str, str]:
-    first = deal.get("seller_first")
-    last = deal.get("seller_last")
-    if first or last:
-        return first or "", last or ""
-    parts = str(deal.get("seller_name", "")).split()
-    return (parts[0] if parts else ""), (" ".join(parts[1:]) if len(parts) > 1 else "")
+def build_fields(deal: dict) -> dict:
+    """Map a deal dict to Muffin's proven PandaDoc field names."""
+
+    return {
+        "property_address": deal.get("property_address") or deal.get("address", ""),
+        "property_city": deal.get("city", ""),
+        "property_state": deal.get("state", ""),
+        "property_zip": deal.get("zip", ""),
+        "seller_name": str(deal.get("seller_name", "")),
+        "seller_email": deal.get("contact_email") or deal.get("contact", ""),
+        "purchase_price": str(deal.get("agreed_price") or deal.get("offer_price", "")),
+        "assignment_fee": str(deal.get("assignment_fee", "")),
+        "closing_date": deal.get("closing_date", ""),
+        "buyer_name": "ARIA Capital LLC",
+        "buyer_email": "justin@ariacapital.tech",
+        "special_terms": _STANDARD_TERMS,
+    }
 
 
 def create_and_send(deal: dict, *, api_key: str, template_id: str,
-                    http_request=_request, sleep=time.sleep,
-                    draft_poll: int = 6) -> dict:
-    """Create the doc from the template, wait for draft, and send it for e-sign.
+                    http_request=_request) -> dict:
+    """Create the document from the template and send it for e-sign.
 
-    Returns ``{ok, document_id, status_code, detail}``. PandaDoc creates in an
-    ``uploaded`` state and must reach ``draft`` before it can be sent, so we poll
-    the document status briefly before sending.
+    Mirrors Muffin's create→send (``template_id`` + ``fields`` payload). Returns
+    ``{ok, document_id, status_code, detail}``.
     """
 
-    first, last = _split_name(deal)
-    seller_email = deal.get("contact_email") or deal.get("contact")
-    body = {
-        "name": f"Purchase Agreement — {deal.get('property_address', 'lot')}",
-        "template_uuid": template_id,
+    fields = build_fields(deal)
+    payload = {
+        "name": f"Purchase Agreement — {fields['property_address'] or 'Property'}",
+        "template_id": template_id,
         "recipients": [{
-            "email": seller_email, "first_name": first, "last_name": last,
+            "email": fields["seller_email"],
+            "first_name": (fields["seller_name"].split() or [""])[0],
+            "last_name": " ".join(fields["seller_name"].split()[1:]),
             "role": "Seller",
         }],
-        "tokens": [
-            {"name": "property_address", "value": str(deal.get("property_address", ""))},
-            {"name": "agreed_price", "value": str(deal.get("agreed_price", ""))},
-            {"name": "seller_name", "value": str(deal.get("seller_name", ""))},
-            {"name": "apn", "value": str(deal.get("apn", ""))},
-        ],
+        "fields": fields,
+        "options": {"send_completed_email": False},
         "metadata": {"deal_id": deal.get("deal_id")},
     }
-    status, resp = http_request("POST", f"{_BASE}/documents", body, api_key)
-    if not (200 <= status < 300):
+    status, resp = http_request("POST", f"{_BASE}/documents", payload, api_key)
+    if status != 201:
         return {"ok": False, "document_id": None, "status_code": status, "detail": resp[:300]}
 
     doc_id = json.loads(resp or "{}").get("id")
-
-    # Wait for the template to render into a draft before sending.
-    for _ in range(draft_poll):
-        s, r = http_request("GET", f"{_BASE}/documents/{doc_id}", None, api_key)
-        if 200 <= s < 300 and json.loads(r or "{}").get("status") == "document.draft":
-            break
-        sleep(2)
-
     s2, r2 = http_request(
         "POST", f"{_BASE}/documents/{doc_id}/send",
         {"message": "Please review and sign your cash purchase agreement.", "silent": False},
