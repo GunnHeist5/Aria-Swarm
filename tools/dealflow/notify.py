@@ -62,11 +62,12 @@ def send_approval(deal: dict, *, token: str, chat_id: str, http_post=_post) -> t
     return http_post(_API.format(token=token, method="sendMessage"), payload)
 
 
-def send_text(text: str, *, token: str, chat_id: str, http_post=_post) -> tuple[int, str]:
-    return http_post(
-        _API.format(token=token, method="sendMessage"),
-        {"chat_id": chat_id, "text": text, "parse_mode": "Markdown"},
-    )
+def send_text(text: str, *, token: str, chat_id: str,
+              parse_mode: str | None = "Markdown", http_post=_post) -> tuple[int, str]:
+    payload = {"chat_id": chat_id, "text": text}
+    if parse_mode:  # None -> plain text, so arbitrary content can't break the send
+        payload["parse_mode"] = parse_mode
+    return http_post(_API.format(token=token, method="sendMessage"), payload)
 
 
 def answer_callback(callback_query_id: str, text: str, *, token: str, http_post=_post):

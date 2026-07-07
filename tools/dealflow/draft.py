@@ -74,10 +74,14 @@ def draft_and_notify(lead_email: str, reply_text: str, read: str, *, export_path
                      token, chat_id, llm, notifier=_notify, lookup_cls=FileLookup) -> dict:
     """Price the lot, draft a reply, and push it to Telegram. Never raises."""
 
-    header = f"📩 *New reply* from `{lead_email}`\n_Read:_ {read}\n"
+    header = f"📩 New reply from {lead_email}\nRead: {read}\n"
 
     if not (token and chat_id):
         return {"drafted": False, "reason": "telegram_unconfigured"}
+
+    # Plain text (no Markdown) so an LLM draft with * _ [ etc. can't break the send.
+    def push(text):
+        notifier.send_text(text, token=token, chat_id=chat_id, parse_mode=None)
 
     rec = None
     try:
@@ -87,34 +91,30 @@ def draft_and_notify(lead_email: str, reply_text: str, read: str, *, export_path
         rec = None
 
     if rec is None:
-        notifier.send_text(
-            header + "\n⚠️ Couldn't match this reply to a lot in the export — "
-            "handle this one manually.", token=token, chat_id=chat_id)
+        push(header + "\n⚠️ Couldn't match this reply to a lot in the export — "
+             "handle this one manually.")
         return {"drafted": False, "reason": "no_property"}
 
     band = compute_offer_range(rec)
     if band.get("escalate"):
-        notifier.send_text(
-            header + f"\n⚠️ *Escalate* ({band['escalate_reason']}) — don't auto-offer; "
-            f"handle manually.\nProperty: {rec.address}", token=token, chat_id=chat_id)
+        push(header + f"\n⚠️ Escalate ({band['escalate_reason']}) — don't auto-offer; "
+             f"handle manually.\nProperty: {rec.address}")
         return {"drafted": False, "reason": band["escalate_reason"]}
 
     try:
         draft = draft_reply(reply_text, band, read, llm=llm)
     except Exception as exc:  # noqa: BLE001
-        notifier.send_text(
-            header + f"\n(couldn't auto-draft: {type(exc).__name__}) — but your band is "
-            f"open {_money(band['opening_offer'])} · ceiling {_money(band['max_offer'])}.",
-            token=token, chat_id=chat_id)
+        push(header + f"\n(couldn't auto-draft: {type(exc).__name__}) — but your band is "
+             f"open {_money(band['opening_offer'])}, ceiling {_money(band['max_offer'])}.")
         return {"drafted": False, "reason": "draft_failed", "band": band}
 
     msg = (
         header
         + f"Property: {rec.address}, {rec.city or ''} {rec.state or ''}\n"
-        + f"Your band: open {_money(band['opening_offer'])} · "
-        + f"ceiling {_money(band['max_offer'])} _(never quote the ceiling)_\n\n"
-        + "── *Draft reply* (review & send from Instantly) ──\n"
+        + f"Your band: open {_money(band['opening_offer'])}, "
+        + f"ceiling {_money(band['max_offer'])} (never quote the ceiling)\n\n"
+        + "—— Draft reply (review & send from Instantly) ——\n"
         + draft
     )
-    notifier.send_text(msg, token=token, chat_id=chat_id)
+    push(msg)
     return {"drafted": True, "band": band, "draft": draft}
