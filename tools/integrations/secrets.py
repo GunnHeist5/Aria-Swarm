@@ -56,6 +56,7 @@ REQUIRED: dict[str, list[str]] = {
     "cloudflare": ["CLOUDFLARE_API_TOKEN", "CLOUDFLARE_ACCOUNT_ID"],
     "composio": ["COMPOSIO_API_KEY"],
     "telegram": ["MUFFIN_TELEGRAM_TOKEN", "JUSTIN_TELEGRAM_CHAT_ID"],
+    "dealflow": ["DEALFLOW_SECRET", "TELEGRAM_WEBHOOK_SECRET", "PANDADOC_WEBHOOK_SECRET"],
 }
 
 # Sensible non-secret defaults (overridable via env). These are NOT secrets.

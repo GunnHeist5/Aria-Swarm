@@ -42,7 +42,16 @@ from fastapi import FastAPI, Header, HTTPException, Request
 
 from tools.muffin_bridge import looks_automated, notify_seller_reply
 
-app = FastAPI(title="ARIA Instantly reply receiver", version="1.0")
+app = FastAPI(title="ARIA inbound receiver", version="1.1")
+
+# Deal-approval flow (Telegram HITL + PandaDoc) shares this service + tunnel:
+#   POST /deal-agreed  /telegram/callback  /pandadoc/webhook
+try:
+    from tools.dealflow.router import router as _dealflow_router
+
+    app.include_router(_dealflow_router)
+except Exception:  # never let a dealflow import break the reply webhook
+    pass
 
 REPLY_EVENT = "reply_received"
 

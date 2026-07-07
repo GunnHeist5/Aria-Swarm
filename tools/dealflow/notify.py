@@ -1,0 +1,85 @@
+"""tools/dealflow/notify.py — Telegram push with Accept/Decline for deal approval.
+
+When Jessica closes a verbal, the operator gets a Telegram message with the deal
+summary and two inline buttons. Tapping one sends a callback back to the swarm
+(handled in ``router.py``). Contracts are CRITICAL_GATE — nothing goes out until
+a human taps Accept.
+
+All network is a single injectable ``http_post`` so the flow is fully testable
+offline. Live creds come from ``MUFFIN_TELEGRAM_TOKEN`` / ``JUSTIN_TELEGRAM_CHAT_ID``.
+"""
+
+from __future__ import annotations
+
+import json
+import urllib.error
+import urllib.request
+
+_API = "https://api.telegram.org/bot{token}/{method}"
+
+
+def _post(url: str, payload: dict) -> tuple[int, str]:
+    req = urllib.request.Request(
+        url, data=json.dumps(payload).encode("utf-8"),
+        headers={"Content-Type": "application/json"}, method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=20) as r:
+            return r.status, r.read().decode("utf-8", "replace")
+    except urllib.error.HTTPError as exc:
+        return exc.code, exc.read().decode("utf-8", "replace")
+
+
+def _money(v) -> str:
+    try:
+        return f"${float(v):,.0f}"
+    except (TypeError, ValueError):
+        return str(v)
+
+
+def format_deal(deal: dict) -> str:
+    return (
+        "🏡 *New verbal agreement — approve to send the contract*\n\n"
+        f"*Seller:* {deal.get('seller_name', '?')}\n"
+        f"*Property:* {deal.get('property_address', '?')}\n"
+        f"*County / State:* {deal.get('county', '?')}, {deal.get('state', '?')}\n"
+        f"*Agreed price:* {_money(deal.get('agreed_price'))}\n"
+        f"*Contact:* {deal.get('contact', '?')}\n\n"
+        "Tap *Accept* to email the purchase agreement, or *Decline*."
+    )
+
+
+def send_approval(deal: dict, *, token: str, chat_id: str, http_post=_post) -> tuple[int, str]:
+    payload = {
+        "chat_id": chat_id,
+        "text": format_deal(deal),
+        "parse_mode": "Markdown",
+        "reply_markup": {"inline_keyboard": [[
+            {"text": "✅ Accept & send contract", "callback_data": f"accept:{deal['deal_id']}"},
+            {"text": "❌ Decline", "callback_data": f"decline:{deal['deal_id']}"},
+        ]]},
+    }
+    return http_post(_API.format(token=token, method="sendMessage"), payload)
+
+
+def send_text(text: str, *, token: str, chat_id: str, http_post=_post) -> tuple[int, str]:
+    return http_post(
+        _API.format(token=token, method="sendMessage"),
+        {"chat_id": chat_id, "text": text, "parse_mode": "Markdown"},
+    )
+
+
+def answer_callback(callback_query_id: str, text: str, *, token: str, http_post=_post):
+    return http_post(
+        _API.format(token=token, method="answerCallbackQuery"),
+        {"callback_query_id": callback_query_id, "text": text},
+    )
+
+
+def parse_callback(update: dict) -> tuple[str, str, str | None, int | None]:
+    """Extract ``(action, deal_id, callback_query_id, chat_id)`` from an update."""
+
+    cq = update.get("callback_query") or {}
+    action, _, deal_id = (cq.get("data") or "").partition(":")
+    chat_id = ((cq.get("message") or {}).get("chat") or {}).get("id")
+    return action, deal_id, cq.get("id"), chat_id
