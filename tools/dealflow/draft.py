@@ -12,7 +12,9 @@ offline. Best-effort by design: a draft failure must never break reply triage.
 
 from __future__ import annotations
 
-from tools.dealdesk.lookup import FileLookup
+import re
+
+from tools.dealdesk.lookup import FileLookup, _to_float
 from tools.dealdesk.pricing import compute_offer_range
 
 from . import notify as _notify
@@ -27,9 +29,14 @@ Rules:
 NEVER state, hint at, or exceed the ceiling, and never call any number a "maximum".
 - If the seller named a price at or under the ceiling, you can warmly agree and move \
 toward next steps (a simple cash purchase agreement, we cover closing).
-- If their price is above the ceiling, make the value case (cash, as-is, no fees or \
-commissions, we cover closing, land is illiquid, online estimates run high for bare \
-lots) and offer near the opening / what you "can do" — do NOT meet their number.
+- If their price is above the ceiling, make the value case and offer near the opening \
+/ what you "can do" — do NOT meet their number. Value angles to draw from: all cash \
+and as-is; NO agent commission (they keep the 6-10% they'd lose on a listing, so your \
+number nets them close to a higher listed price); we cover closing costs; land is \
+illiquid and sits for months-to-years with lots of competing listings; bigger tracts \
+trade at a lower price-per-acre than small infill lots (acreage discount); and the \
+carrying cost of holding vacant land (taxes on dirt producing nothing) plus the \
+certainty of a fast close with no financing or survey games.
 - If no price yet, make a clean cash offer at the opening number.
 - Never reveal assessed value, the formula, or that a number is a ceiling. Sound like \
 a real person, not a template.
@@ -70,6 +77,62 @@ def _money(v) -> str:
         return str(v)
 
 
+def _parse_price(text: str | None) -> float | None:
+    """Pull a dollar figure out of the qualifier read (e.g. 'they want 75k')."""
+
+    if not text:
+        return None
+    m = re.search(r"\$?\s*([\d,]+(?:\.\d+)?)\s*([kK])?", text)
+    if not m:
+        return None
+    try:
+        n = float(m.group(1).replace(",", ""))
+    except ValueError:
+        return None
+    if m.group(2):
+        n *= 1000
+    return n if 500 <= n <= 5_000_000 else None
+
+
+def deal_card(rec, band: dict, ask: float | None) -> str:
+    """A Fable-style brief from data we already have in the export — no APIs."""
+
+    raw = rec.raw or {}
+    lot = _to_float(raw.get("Lot Size Sqft"))
+    assessed = rec.assessed_value
+    last_amt = _to_float(raw.get("Last Sale Amount"))
+    last_date = str(raw.get("Last Sale Recording Date") or "")[:10]
+
+    lines = [f"📊 Deal card — {rec.address}, {rec.city or ''} {rec.state or ''}"]
+    if lot:
+        lines.append(f"Lot: {lot / 43560:.2f} ac ({lot:,.0f} sqft)")
+    if assessed:
+        psf = f" (${assessed / lot:.2f}/sqft)" if lot else ""
+        lines.append(f"Assessed: {_money(assessed)}{psf}")
+    if ask:
+        psf = f" (${ask / lot:.2f}/sqft)" if lot else ""
+        lines.append(f"Their ask: {_money(ask)}{psf}")
+    if last_amt:
+        when = f" on {last_date}" if last_date else ""
+        lines.append(f"Last sale: {_money(last_amt)}{when}  ← likely his floor")
+    elif last_date:
+        lines.append(f"Last sale: {last_date} (amount not in export — pull the deed for his floor)")
+    owed = (rec.open_loans_balance or 0.0) + (rec.lien_amount or 0.0)
+    if owed:
+        lines.append(f"Liens/loans: {_money(owed)}")
+    lines.append(f"Your band: open {_money(band['opening_offer'])}, "
+                 f"ceiling {_money(band['max_offer'])} (never quote the ceiling)")
+    lines += [
+        "",
+        "Verify before you counter:",
+        "❓ Sold comps (not listings) — 3-5 similar lots, last 12mo (PropStream)",
+        "❓ Flood zone — FEMA map by APN (AE zone = cut the numbers)",
+        "❓ Access + utilities at the lot (landlocked/no-utilities kills demand)",
+        "❓ Taxes current",
+    ]
+    return "\n".join(lines)
+
+
 def draft_and_notify(lead_email: str, reply_text: str, read: str, *, export_path,
                      token, chat_id, llm, notifier=_notify, lookup_cls=FileLookup) -> dict:
     """Price the lot, draft a reply, and push it to Telegram. Never raises."""
@@ -108,13 +171,11 @@ def draft_and_notify(lead_email: str, reply_text: str, read: str, *, export_path
              f"open {_money(band['opening_offer'])}, ceiling {_money(band['max_offer'])}.")
         return {"drafted": False, "reason": "draft_failed", "band": band}
 
+    card = deal_card(rec, band, _parse_price(read))
     msg = (
-        header
-        + f"Property: {rec.address}, {rec.city or ''} {rec.state or ''}\n"
-        + f"Your band: open {_money(band['opening_offer'])}, "
-        + f"ceiling {_money(band['max_offer'])} (never quote the ceiling)\n\n"
-        + "—— Draft reply (review & send from Instantly) ——\n"
+        header + "\n" + card
+        + "\n\n—— Draft reply (review & send from Instantly) ——\n"
         + draft
     )
     push(msg)
-    return {"drafted": True, "band": band, "draft": draft}
+    return {"drafted": True, "band": band, "draft": draft, "card": card}
