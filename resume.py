@@ -26,7 +26,7 @@ from datetime import datetime, timezone
 try:
     from dotenv import load_dotenv
 
-    load_dotenv()
+    load_dotenv(override=True)
 except ImportError:
     pass
 
