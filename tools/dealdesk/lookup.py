@@ -93,6 +93,7 @@ class FileLookup:
     def __init__(self, path: str | Path):
         self.by_apn: dict[str, PropertyRecord] = {}
         self.by_addr: dict[str, PropertyRecord] = {}
+        self.by_email: dict[str, PropertyRecord] = {}
         for row in parse_propstream(path):
             rec = _to_record(row)
             if rec.apn:
@@ -100,6 +101,18 @@ class FileLookup:
             key = _norm_address(rec.address)
             if key:
                 self.by_addr.setdefault(key, rec)
+            # Index the lead's emails so an inbound reply maps back to its lot.
+            for i in range(1, 5):
+                email = str(row.get(f"Email {i}", "") or "").strip().lower()
+                if email:
+                    self.by_email.setdefault(email, rec)
+
+    def find_by_email(self, email: str | None) -> PropertyRecord | None:
+        """Map an inbound reply's sender address back to their property record."""
+
+        if not email:
+            return None
+        return self.by_email.get(email.strip().lower())
 
     def find(self, *, address: str | None = None, apn: str | None = None,
              owner_name: str | None = None) -> PropertyRecord | None:

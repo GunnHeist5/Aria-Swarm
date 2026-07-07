@@ -37,6 +37,7 @@ import hashlib
 import json
 import logging
 import os
+import re
 from typing import Any
 
 from langgraph.checkpoint.memory import MemorySaver
@@ -663,7 +664,36 @@ def qualify_reply_node(state: BusinessState) -> BusinessState:
         "contact": payload.get("contact"),
     }
     state["error_log"].append(f"QUALIFIED: seller reply for lead {lead_id}")
+
+    # Assisted-draft: match the reply to its lot, price it, draft a reply in
+    # Jessica's voice, and push it to the operator's Telegram to review + send.
+    # Best-effort — a draft failure must never break triage/recording.
+    try:
+        from tools.dealflow.draft import draft_and_notify
+        from tools.integrations.secrets import get_secret
+
+        draft_and_notify(
+            lead_id, reply_text, _short_read(assessment),
+            export_path=os.environ.get("DEALDESK_EXPORT_PATH"),
+            token=get_secret("SWARM_TELEGRAM_TOKEN") or get_secret("MUFFIN_TELEGRAM_TOKEN"),
+            chat_id=get_secret("JUSTIN_TELEGRAM_CHAT_ID"),
+            llm=get_llm_backend(SPECIALIST_MODEL, state["llm"].get("phenotype")),
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("reply-draft assist failed for %s: %s", lead_id, exc)
+
     return state
+
+
+def _short_read(assessment_xml: str) -> str:
+    """One-line summary of the qualifier verdict for the Telegram header."""
+
+    def g(tag: str) -> str:
+        m = re.search(f"<{tag}>(.*?)</{tag}>", assessment_xml or "", re.S)
+        return m.group(1).strip() if m else "?"
+
+    return (f"{g('verdict')} · they want {g('price_signal')} · "
+            f"action: {g('next_action')}")
 
 
 def book_revenue_node(state: BusinessState) -> BusinessState:
