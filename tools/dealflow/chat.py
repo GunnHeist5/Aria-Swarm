@@ -165,7 +165,16 @@ def handle_message(message: dict, *, token: str, chat_id: str,
 
     try:
         llm = llm or _default_llm()
-        answer = _content(llm.invoke(build_prompt(lead, question)))
+        # Agentic path: the model gets tools (lookup/price/list/agree/suppress)
+        # and the focused deal's context as its user message. Falls back to a
+        # plain single call if the agent layer itself is unavailable.
+        try:
+            from . import agent
+            toolbox = agent.Toolbox(token=token, chat_id=chat_id)
+            answer = agent.run_agent(build_prompt(lead, question), llm=llm,
+                                     toolbox=toolbox)
+        except ImportError:
+            answer = _content(llm.invoke(build_prompt(lead, question)))
     except Exception as exc:  # noqa: BLE001
         say(f"(deal chat hit an error: {type(exc).__name__} — try again)")
         return {"answered": False, "reason": "llm_error"}

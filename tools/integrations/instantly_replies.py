@@ -71,7 +71,7 @@ _QUOTE_MARKERS = (
 )
 
 
-def _trim_quoted(text: str) -> str:
+def trim_quoted(text: str) -> str:
     if re.match(r"\s*>", text):  # body is pure quote from the first character
         return ""
     cut = len(text)
@@ -80,6 +80,9 @@ def _trim_quoted(text: str) -> str:
         if m:
             cut = min(cut, m.start())
     return text[:cut].strip()
+
+
+_trim_quoted = trim_quoted  # back-compat alias
 
 
 def extract_reply(item: dict) -> dict | None:

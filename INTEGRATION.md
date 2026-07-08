@@ -226,6 +226,14 @@ operator's `JUSTIN_TELEGRAM_CHAT_ID` is answered. Chat can explain, re-price,
 and re-draft, but has no send path — emails go out from Instantly (operator)
 and contracts only via the Accept button (CRITICAL_GATE unchanged).
 
+The chat is **agentic** (`tools/dealflow/agent.py`): the model carries tools —
+`lookup_property` (any lead, by email or address), `list_pending_deals`,
+`agree_deal(email, price)` (stores the deal at the *negotiated* price and sends
+the Accept/Decline prompt — refuses a price above the ceiling), and
+`suppress_lead`. So "agreed at 85k with jane@…" closes at the real number; the
+push button remains the shortcut for closing at the opening. No tool sends
+email; `agree_deal` only *asks* — Accept is still the only path to a contract.
+
 Draft registers: when a seller's ask exceeds **2× the ceiling**, the auto-draft
 switches from the warm template to a candid, number-forward register (state the
 opening, ground it in assessed value, leave the door open, don't chase).

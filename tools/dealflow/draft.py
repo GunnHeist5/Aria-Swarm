@@ -293,7 +293,9 @@ def draft_and_notify(lead_email: str, reply_text: str, read: str, *, export_path
         header + "\n" + card
         + "\n\n—— Draft reply (review & send from Instantly) ——\n"
         + draft
-        + "\n\nWhen they say yes on price, tap below to send the contract."
+        + "\n\nNegotiate by email first. When a price is actually agreed: tap the"
+          " button to contract at the opening, or message me here — e.g."
+          " \"agreed at 85k\" — to contract at the real number."
     )
 
     # Stash the deal behind the button so a later 'agreed' tap can fire the

@@ -115,6 +115,15 @@ async def instantly_reply(request: Request, token: str | None = None,
         or body.get("reply_subject")
         or ""
     ).strip()
+    # Trim the quoted thread the same way the poller does — same text means the
+    # same reply hash, so a reply seen by BOTH sensors dedups instead of
+    # pushing twice.
+    try:
+        from .instantly_replies import trim_quoted
+
+        reply_text = trim_quoted(reply_text) or reply_text
+    except Exception:  # trimming must never break the receiver
+        pass
 
     if not lead:
         return {"ok": True, "ignored": "no_lead_email"}
