@@ -160,7 +160,11 @@ def draft_and_notify(lead_email: str, reply_text: str, read: str, *, export_path
 
     # Plain text (no Markdown) so an LLM draft with * _ [ etc. can't break the send.
     def push(text):
-        notifier.send_text(text, token=token, chat_id=chat_id, parse_mode=None)
+        status, body = notifier.send_text(text, token=token, chat_id=chat_id,
+                                          parse_mode=None)
+        print(f"[draft] telegram send status={status}"
+              + ("" if status == 200 else f" body={str(body)[:200]}"))
+        return status, body
 
     rec = None
     try:
@@ -219,8 +223,13 @@ def draft_and_notify(lead_email: str, reply_text: str, read: str, *, export_path
     if deal_id:
         buttons = [(f"✅ Deal agreed — send contract @ {_money(band['opening_offer'])}",
                     f"agree:{deal_id}")]
-        notifier.send_with_buttons(msg, buttons, token=token, chat_id=chat_id,
-                                   parse_mode=None)
+        status, body = notifier.send_with_buttons(
+            msg, buttons, token=token, chat_id=chat_id, parse_mode=None)
+        print(f"[draft] telegram button-send status={status}"
+              + ("" if status == 200 else f" body={str(body)[:200]}"))
+        if status != 200:
+            # Never lose the deal card to a rejected keyboard payload — resend plain.
+            push(msg + f"\n\n(button failed — deal stashed as {deal_id})")
     else:
         push(msg)
     return {"drafted": True, "band": band, "draft": draft, "card": card,

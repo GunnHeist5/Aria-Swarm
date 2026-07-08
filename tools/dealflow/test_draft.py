@@ -73,6 +73,21 @@ def test_priced_lead_gets_draft_pushed():
     assert res["deal_id"] == "Dtest123"
 
 
+def test_button_send_failure_falls_back_to_plain():
+    class RejectingNotify(StubNotify):
+        def send_with_buttons(self, text, buttons, *, token, chat_id, **_):
+            self.buttons = buttons
+            return 400, "Bad Request: reply markup rejected"
+    n = RejectingNotify()
+    res = D.draft_and_notify(
+        "jane@gmail.com", "ok", "warm · none · respond",
+        export_path="ok", token="t", chat_id="c", llm=StubLLM(),
+        notifier=n, lookup_cls=StubLookup, proposer=lambda deal: "D9")
+    # the card still reached Telegram as plain text; the deal stayed stashed
+    assert res["drafted"] is True and res["deal_id"] == "D9"
+    assert len(n.texts) == 1 and "deal stashed as D9" in n.texts[0]
+
+
 def test_proposer_receives_contract_fields():
     captured = {}
     n = StubNotify()
