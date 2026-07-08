@@ -335,6 +335,15 @@ def test_contracts_check_setup():
         assert rep["tokens_matched"] == ["property_address", "purchase_price"]
         assert "seller_name" in rep["unmatched_ours"]
         assert rep["template_fields"] == ["signature_1"]
+        assert rep["fill_ok"] and "warning" not in rep
+
+        # A reachable template with zero matching {{tokens}} would send
+        # contracts with every merge value blank — must be flagged.
+        empty = ('{"name": "Purchase Agreement", "roles": [{"name": "Client"}], '
+                 '"tokens": [], "fields": [{"merge_field": "Signature"}]}')
+        rep2 = contracts.check_setup(http_request=lambda *a: (200, empty))
+        assert rep2["ok"] and not rep2["fill_ok"] and "warning" in rep2
+
         bad = contracts.check_setup(http_request=lambda *a: (401, "denied"))
         assert not bad["ok"] and bad["status_code"] == 401
     finally:

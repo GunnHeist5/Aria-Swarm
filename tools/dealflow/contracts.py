@@ -254,6 +254,16 @@ def check_setup(*, http_request=_request, template_id: str | None = None,
     out["template_fields"] = sorted(n for n in field_names if n)
     out["tokens_matched"] = sorted(ours & token_names)
     out["unmatched_ours"] = sorted(ours - token_names - field_names)
+    # ok above means key+template reachable; fill_ok means a sent document
+    # would actually carry deal data. A template with zero matching tokens
+    # sends contracts with every merge value silently blank.
+    out["fill_ok"] = bool(out["tokens_matched"])
+    if not out["fill_ok"]:
+        out["warning"] = (
+            "NO deal data would be filled in: the template has no matching "
+            "{{tokens}}. Open the template in the PandaDoc editor and add "
+            "{{token}} placeholders named exactly as in unmatched_ours."
+        )
     return out
 
 
@@ -296,13 +306,13 @@ def main(argv: list[str] | None = None) -> int:
     if args.check:
         report = check_setup()
         print(json.dumps(report, indent=2))
-        return 0 if report["ok"] else 1
+        return 0 if report["ok"] and report.get("fill_ok") else 1
 
     if args.check_assignment:
         report = check_setup(template_id=resolve_assignment_template_id(),
                              our_fields=build_assignment_fields({}))
         print(json.dumps(report, indent=2))
-        return 0 if report["ok"] else 1
+        return 0 if report["ok"] and report.get("fill_ok") else 1
 
     result = test_send(args.test_send)
     print(json.dumps(result, indent=2))
