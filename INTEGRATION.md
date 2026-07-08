@@ -172,6 +172,47 @@ $SWARM -m tools.muffin_bridge leads-synced --count 412
 Booking is idempotent per `deal_id`; the manual `python -m tools.revenue ...`
 still works as a fallback (same ledger).
 
+## Reply puller — Instantly backstop (`tools/integrations/instantly_replies.py`)
+
+The webhook is the real-time sensor; the puller is the guarantee. It lists every
+received reply in the campaign via the Instantly v2 `/emails` API and fires each
+*new* one through the same `seller_reply` pipeline (triage → deal card → draft →
+Telegram). A seen-ledger (`~/.automaton/instantly_replies_seen.json`, keyed by
+Instantly's email id) makes re-polling free — one push per reply, ever.
+
+```bash
+python -m tools.integrations.instantly_replies          # dry-run: list replies
+python -m tools.integrations.instantly_replies --push   # fire NEW replies
+python -m tools.integrations.instantly_replies --raw    # first raw item (schema debug)
+```
+
+Poll-every-5-minutes backstop (systemd):
+
+```ini
+# /etc/systemd/system/aria-replypoll.service
+[Unit]
+Description=ARIA Instantly reply poller
+After=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/root/Aria-Swarm
+ExecStart=/root/Aria-Swarm/.venv/bin/python -m tools.integrations.instantly_replies --push
+
+# /etc/systemd/system/aria-replypoll.timer
+[Unit]
+Description=Poll Instantly replies every 5 minutes
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=5min
+
+[Install]
+WantedBy=timers.target
+```
+
+`systemctl daemon-reload && systemctl enable --now aria-replypoll.timer`
+
 ## Exit codes
 
 `0` done · `1` cycle error (state preserved) · `2` frozen awaiting HITL
