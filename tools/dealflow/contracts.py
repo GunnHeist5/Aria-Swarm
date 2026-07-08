@@ -267,6 +267,21 @@ def check_setup(*, http_request=_request, template_id: str | None = None,
     return out
 
 
+def list_templates(*, http_request=_request) -> dict:
+    """List templates on the PandaDoc account — name + id, for .env setup."""
+
+    key = resolve_api_key()
+    if not key:
+        return {"ok": False, "detail": "set PANDADOC_API_KEY in .env"}
+    status, body = http_request("GET", f"{_BASE}/templates?count=100", None, key)
+    if status != 200:
+        return {"ok": False, "status_code": status, "detail": body[:300]}
+    results = json.loads(body or "{}").get("results") or []
+    return {"ok": True, "templates": [
+        {"id": t.get("id"), "name": t.get("name"),
+         "date_modified": t.get("date_modified")} for t in results]}
+
+
 def test_send(recipient_email: str, *, http_request=_request) -> dict:
     """Send a real test agreement to YOURSELF — sign it to fire the full chain."""
 
@@ -299,9 +314,16 @@ def main(argv: list[str] | None = None) -> int:
                        help="validate the API key + purchase template (creates nothing)")
     group.add_argument("--check-assignment", action="store_true",
                        help="validate the assignment (buyer) template")
+    group.add_argument("--list-templates", action="store_true",
+                       help="list template names + ids on the PandaDoc account")
     group.add_argument("--test-send", metavar="EMAIL",
                        help="send a real TEST agreement to this address (yourself)")
     args = parser.parse_args(argv)
+
+    if args.list_templates:
+        report = list_templates()
+        print(json.dumps(report, indent=2))
+        return 0 if report["ok"] else 1
 
     if args.check:
         report = check_setup()

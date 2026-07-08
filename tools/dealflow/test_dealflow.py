@@ -346,6 +346,13 @@ def test_contracts_check_setup():
 
         bad = contracts.check_setup(http_request=lambda *a: (401, "denied"))
         assert not bad["ok"] and bad["status_code"] == 401
+
+        listing = ('{"results": [{"id": "tpl-1", "name": "Purchase", '
+                   '"date_modified": "2026-07-01"}]}')
+        lst = contracts.list_templates(http_request=lambda *a: (200, listing))
+        assert lst["ok"] and lst["templates"][0]["id"] == "tpl-1"
+        deny = contracts.list_templates(http_request=lambda *a: (403, "no"))
+        assert not deny["ok"] and deny["status_code"] == 403
     finally:
         del os.environ["PANDADOC_API_KEY"]
 
