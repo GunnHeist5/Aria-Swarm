@@ -199,6 +199,44 @@ def test_contracts_create_and_send_ok():
     assert calls[1][1].endswith("/DOC9/send")
 
 
+def test_contracts_check_setup():
+    from . import contracts
+    os.environ["PANDADOC_API_KEY"] = "k-test"
+    try:
+        body = ('{"name": "Purchase Agreement", "roles": [{"name": "Seller"}], '
+                '"fields": [{"merge_field": "property_address"}, '
+                '{"merge_field": "purchase_price"}]}')
+        rep = contracts.check_setup(http_request=lambda *a: (200, body))
+        assert rep["ok"] and rep["api_key_source"] == "env"
+        assert "property_address" in rep["fields_matched"]
+        assert "seller_name" in rep["fields_not_in_template"]
+        bad = contracts.check_setup(http_request=lambda *a: (401, "denied"))
+        assert not bad["ok"] and bad["status_code"] == 401
+    finally:
+        del os.environ["PANDADOC_API_KEY"]
+
+
+def test_contracts_test_send_builds_test_deal():
+    from . import contracts
+    os.environ["PANDADOC_API_KEY"] = "k-test"
+    try:
+        payloads = []
+
+        def stub(method, url, payload, key):
+            payloads.append((url, payload))
+            if url.endswith("/documents"):
+                return 201, '{"id": "DOCX"}'
+            return 200, "{}"
+
+        res = contracts.test_send("me@example.com", http_request=stub)
+        assert res["ok"] and res["document_id"] == "DOCX"
+        create = payloads[0][1]
+        assert create["recipients"][0]["email"] == "me@example.com"
+        assert "SELF-TEST" in create["fields"]["property_address"]
+    finally:
+        del os.environ["PANDADOC_API_KEY"]
+
+
 def test_contracts_create_failure_reported():
     from . import contracts
     res = contracts.create_and_send(

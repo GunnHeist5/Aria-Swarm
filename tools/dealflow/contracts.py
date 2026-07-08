@@ -117,3 +117,92 @@ def create_and_send(deal: dict, *, api_key: str, template_id: str,
         api_key,
     )
     return {"ok": 200 <= s2 < 300, "document_id": doc_id, "status_code": s2, "detail": r2[:300]}
+
+
+# ---------------------------------------------------------------------------
+# Self-verification — prove the PandaDoc path before a seller ever hits it
+# ---------------------------------------------------------------------------
+
+
+def check_setup(*, http_request=_request) -> dict:
+    """Validate the key + template against the live PandaDoc API (no doc made)."""
+
+    key = resolve_api_key()
+    source = ("env" if os.environ.get("PANDADOC_API_KEY")
+              else "muffin_vault_FALLBACK (COMPROMISED — rotate!)" if key
+              else "MISSING")
+    template_id = resolve_template_id()
+    out = {"api_key_source": source, "template_id": template_id, "ok": False}
+    if not key:
+        out["detail"] = "set PANDADOC_API_KEY in .env"
+        return out
+
+    status, body = http_request("GET", f"{_BASE}/templates/{template_id}/details",
+                                None, key)
+    out["status_code"] = status
+    if status != 200:
+        out["detail"] = body[:300]
+        return out
+
+    data = json.loads(body or "{}")
+    out["ok"] = True
+    out["template_name"] = data.get("name")
+    out["roles"] = [r.get("name") for r in (data.get("roles") or [])]
+    template_fields = {(f.get("merge_field") or f.get("name") or "")
+                       for f in (data.get("fields") or [])}
+    ours = set(build_fields({}))
+    out["fields_matched"] = sorted(ours & template_fields)
+    out["fields_not_in_template"] = sorted(ours - template_fields)
+    return out
+
+
+def test_send(recipient_email: str, *, http_request=_request) -> dict:
+    """Send a real test agreement to YOURSELF — sign it to fire the full chain."""
+
+    deal = {
+        "deal_id": "TEST-SELFCHECK",
+        "property_address": "0 Test Ln (SELF-TEST — not a real deal)",
+        "city": "Houston", "state": "TX", "zip": "77000",
+        "seller_name": "Test Seller",
+        "contact": recipient_email,
+        "agreed_price": 12345,
+    }
+    return create_and_send(deal, api_key=resolve_api_key(),
+                           template_id=resolve_template_id(),
+                           http_request=http_request)
+
+
+def main(argv: list[str] | None = None) -> int:
+    import argparse
+
+    try:
+        from dotenv import load_dotenv
+
+        load_dotenv(override=True)
+    except ImportError:
+        pass
+
+    parser = argparse.ArgumentParser(description="PandaDoc contract-path self-check.")
+    group = parser.add_mutually_exclusive_group(required=True)
+    group.add_argument("--check", action="store_true",
+                       help="validate the API key + template (creates nothing)")
+    group.add_argument("--test-send", metavar="EMAIL",
+                       help="send a real TEST agreement to this address (yourself)")
+    args = parser.parse_args(argv)
+
+    if args.check:
+        report = check_setup()
+        print(json.dumps(report, indent=2))
+        return 0 if report["ok"] else 1
+
+    result = test_send(args.test_send)
+    print(json.dumps(result, indent=2))
+    if result["ok"]:
+        print(f"\nSent — check {args.test_send}. Signing it fires the "
+              "PandaDoc webhook -> contract_signed -> dispo clock (if the "
+              "webhook is registered). Or void the doc in PandaDoc.")
+    return 0 if result["ok"] else 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
