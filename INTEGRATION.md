@@ -213,6 +213,23 @@ WantedBy=timers.target
 
 `systemctl daemon-reload && systemctl enable --now aria-replypoll.timer`
 
+## Deal chat — talk back to the deal desk (`tools/dealflow/chat.py`)
+
+Pushes are one-way; the chat is the way back. Send the bot a plain message —
+"why did this escalate?", "counter her at 60k", "rewrite it more direct" — and
+the specialist model answers with the deal's context loaded (card, band,
+seller's words, recent turns). Target a deal by replying to its push, naming
+the seller's email, or saying nothing (most recent push wins).
+
+Every reply push writes its context to `~/.automaton/deal_chat.json`; only the
+operator's `JUSTIN_TELEGRAM_CHAT_ID` is answered. Chat can explain, re-price,
+and re-draft, but has no send path — emails go out from Instantly (operator)
+and contracts only via the Accept button (CRITICAL_GATE unchanged).
+
+Draft registers: when a seller's ask exceeds **2× the ceiling**, the auto-draft
+switches from the warm template to a candid, number-forward register (state the
+opening, ground it in assessed value, leave the door open, don't chase).
+
 ## Exit codes
 
 `0` done · `1` cycle error (state preserved) · `2` frozen awaiting HITL

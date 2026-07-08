@@ -14,6 +14,7 @@ Auth per surface, fail-closed:
 from __future__ import annotations
 
 import os
+import threading
 
 from fastapi import APIRouter, Header, HTTPException, Request
 
@@ -67,6 +68,19 @@ async def telegram_callback(
 
     action, deal_id, cq_id, _ = notify.parse_callback(update)
     if not deal_id:
+        # Not a button tap — maybe the operator talking to the deal desk.
+        message = update.get("message") or {}
+        token, chat_id = _telegram()
+        if (message.get("text") and chat_id
+                and str((message.get("chat") or {}).get("id")) == str(chat_id)):
+            from . import chat as deal_chat
+
+            # Answer off-thread: the LLM takes seconds, Telegram wants its 200 now.
+            threading.Thread(
+                target=deal_chat.handle_message, args=(message,),
+                kwargs={"token": token, "chat_id": chat_id}, daemon=True,
+            ).start()
+            return {"ok": True, "chat": "answering"}
         return {"ok": True, "ignored": "no_callback"}
     token, chat_id = _telegram()
     if cq_id and token:

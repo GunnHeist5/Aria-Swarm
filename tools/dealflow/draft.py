@@ -17,6 +17,7 @@ import re
 from tools.dealdesk.lookup import FileLookup, _to_float
 from tools.dealdesk.pricing import compute_offer_range
 
+from . import chat as _chat
 from . import notify as _notify
 
 DRAFT_PROMPT = """You are Jessica Young, an acquisitions specialist at ARIA Capital, \
@@ -44,8 +45,20 @@ a real person, not a template.
 <seller_reply>{reply}</seller_reply>
 <internal_numbers>opening={opening} ceiling={ceiling} — NEVER reveal or exceed the ceiling</internal_numbers>
 <qualifier_read>{read}</qualifier_read>
-
+{extra}
 Write the email body:"""
+
+# When the ask is >2x the ceiling, warm mirroring reads weak — switch register.
+BIG_GAP_RULES = """
+OVERRIDE — the seller's ask is more than double our ceiling. Drop the warm \
+template and write 3-4 candid, matter-of-fact sentences instead: say plainly \
+that their number is far outside the range this lot actually trades in, give \
+the OPENING number as where we'd be, ground it in one concrete fact (the \
+county's assessed value, or what comparable lots really sell for), and leave \
+the door open if their timing ever changes. No apologies, no chasing, no \
+exclamation points, no fake enthusiasm — a real number from a real buyer, \
+take it or keep it in a drawer.
+"""
 
 
 def _content(resp) -> str:
@@ -58,7 +71,8 @@ def _content(resp) -> str:
     return str(content).strip()
 
 
-def draft_reply(reply_text: str, band: dict, read: str, *, llm) -> str:
+def draft_reply(reply_text: str, band: dict, read: str, *, llm,
+                big_gap: bool = False) -> str:
     """Generate the reply email body from the price band + seller message."""
 
     prompt = DRAFT_PROMPT.format(
@@ -66,6 +80,7 @@ def draft_reply(reply_text: str, band: dict, read: str, *, llm) -> str:
         opening=band.get("opening_offer"),
         ceiling=band.get("max_offer"),
         read=read or "(no read)",
+        extra=BIG_GAP_RULES if big_gap else "",
     )
     return _content(llm.invoke(prompt))
 
@@ -151,7 +166,7 @@ def deal_card(rec, band: dict, ask: float | None) -> str:
 
 def draft_and_notify(lead_email: str, reply_text: str, read: str, *, export_path,
                      token, chat_id, llm, notifier=_notify, lookup_cls=FileLookup,
-                     proposer=None) -> dict:
+                     proposer=None, remember=None) -> dict:
     """Price the lot, draft a reply, and push it to Telegram. Never raises.
 
     On a clean, priceable lot the push carries a '✅ Send contract' button: when
@@ -164,6 +179,15 @@ def draft_and_notify(lead_email: str, reply_text: str, read: str, *, export_path
 
     if not (token and chat_id):
         return {"drafted": False, "reason": "telegram_unconfigured"}
+
+    def recall(**ctx):
+        # Feed the deal-chat ledger so the operator can talk back about this
+        # lead. Best-effort: chat is a convenience, never a failure source.
+        try:
+            (remember or _chat.remember)(lead_email, reply_text=reply_text,
+                                         read=read, **ctx)
+        except Exception:  # noqa: BLE001
+            pass
 
     # Plain text (no Markdown) so an LLM draft with * _ [ etc. can't break the send.
     def push(text):
@@ -183,6 +207,7 @@ def draft_and_notify(lead_email: str, reply_text: str, read: str, *, export_path
     if rec is None:
         push(header + "\n⚠️ Couldn't match this reply to a lot in the export — "
              "handle this one manually.")
+        recall(address="(no match in export)")
         return {"drafted": False, "reason": "no_property"}
 
     band = compute_offer_range(rec)
@@ -192,16 +217,20 @@ def draft_and_notify(lead_email: str, reply_text: str, read: str, *, export_path
         card = deal_card(rec, band, _parse_price(read))
         push(header + f"\n⚠️ Escalate ({band['escalate_reason']}) — no auto-offer; "
              "your call.\n\n" + card)
+        recall(address=rec.address, card=card,
+               escalate_reason=band["escalate_reason"])
         return {"drafted": False, "reason": band["escalate_reason"]}
 
+    ask = _parse_price(read)
+    big_gap = bool(ask and band.get("max_offer") and ask > 2 * band["max_offer"])
     try:
-        draft = draft_reply(reply_text, band, read, llm=llm)
+        draft = draft_reply(reply_text, band, read, llm=llm, big_gap=big_gap)
     except Exception as exc:  # noqa: BLE001
         push(header + f"\n(couldn't auto-draft: {type(exc).__name__}) — but your band is "
              f"open {_money(band['opening_offer'])}, ceiling {_money(band['max_offer'])}.")
         return {"drafted": False, "reason": "draft_failed", "band": band}
 
-    card = deal_card(rec, band, _parse_price(read))
+    card = deal_card(rec, band, ask)
     msg = (
         header + "\n" + card
         + "\n\n—— Draft reply (review & send from Instantly) ——\n"
@@ -242,5 +271,7 @@ def draft_and_notify(lead_email: str, reply_text: str, read: str, *, export_path
             push(msg + f"\n\n(button failed — deal stashed as {deal_id})")
     else:
         push(msg)
+    recall(address=rec.address, card=card, draft=draft, deal_id=deal_id,
+           band={"opening_offer": band["opening_offer"], "max_offer": band["max_offer"]})
     return {"drafted": True, "band": band, "draft": draft, "card": card,
             "deal_id": deal_id}

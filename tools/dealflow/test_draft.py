@@ -5,6 +5,13 @@ Run: python -m tools.dealflow.test_draft
 
 from __future__ import annotations
 
+import os
+import tempfile
+
+# Point the deal-chat ledger at a temp file BEFORE importing draft (which
+# imports chat, which resolves its store path at import time).
+os.environ["DEAL_CHAT_STORE"] = os.path.join(tempfile.mkdtemp(), "chat.json")
+
 from tools.dealdesk.lookup import PropertyRecord
 
 from . import draft as D
@@ -142,6 +149,38 @@ def test_draft_reply_builds_prompt():
                         "hot · 60k · offer", llm=llm)
     assert out == "drafted body"
     assert "I want 60k" in llm.prompts[0]
+    assert "OVERRIDE" not in llm.prompts[0]  # normal register
+
+
+def test_big_gap_ask_switches_register():
+    # Beulah ceiling is 107,100 -> a 400k ask (>2x) flips to the candid register.
+    llm = StubLLM()
+    D.draft_and_notify(
+        "jane@gmail.com", "firm 400k", "warm · they want 400k · action: offer",
+        export_path="ok", token="t", chat_id="c", llm=llm,
+        notifier=StubNotify(), lookup_cls=StubLookup, proposer=lambda d: "D1",
+        remember=lambda *a, **k: None)
+    assert "OVERRIDE" in llm.prompts[0]
+    # a near-band ask stays warm
+    llm2 = StubLLM()
+    D.draft_and_notify(
+        "jane@gmail.com", "I'd take 95k", "hot · they want 95k · action: offer",
+        export_path="ok", token="t", chat_id="c", llm=llm2,
+        notifier=StubNotify(), lookup_cls=StubLookup, proposer=lambda d: "D1",
+        remember=lambda *a, **k: None)
+    assert "OVERRIDE" not in llm2.prompts[0]
+
+
+def test_pushes_feed_the_chat_ledger():
+    seen = {}
+    D.draft_and_notify(
+        "jane@gmail.com", "I'd take 40k", "hot · they want 40k · action: offer",
+        export_path="ok", token="t", chat_id="c", llm=StubLLM(),
+        notifier=StubNotify(), lookup_cls=StubLookup, proposer=lambda d: "D7",
+        remember=lambda lead, **ctx: seen.update({"lead": lead, **ctx}))
+    assert seen["lead"] == "jane@gmail.com"
+    assert seen["deal_id"] == "D7" and "Beulah" in seen["address"]
+    assert seen["band"]["max_offer"] == 107100 and seen["draft"]
 
 
 if __name__ == "__main__":
