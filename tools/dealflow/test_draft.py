@@ -123,6 +123,10 @@ def test_escalate_band_no_autodraft():
         notifier=n, lookup_cls=ListedLookup)
     assert res["drafted"] is False
     assert "Escalate" in n.texts[0]
+    # the escalate push still carries the full deal card (numbers, not just a code)
+    assert "Assessed: $170,000" in n.texts[0]
+    assert "No auto-band" in n.texts[0]
+    assert "Draft reply" not in n.texts[0]  # but never a draft/button on escalations
 
 
 def test_telegram_unconfigured_is_safe():

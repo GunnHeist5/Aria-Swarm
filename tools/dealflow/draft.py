@@ -118,6 +118,9 @@ def deal_card(rec, band: dict, ask: float | None) -> str:
     if assessed:
         psf = f" (${assessed / lot:.2f}/sqft)" if lot else ""
         lines.append(f"Assessed: {_money(assessed)}{psf}")
+    if rec.est_value:
+        lines.append(f"Est. value (PropStream): {_money(rec.est_value)}"
+                     " — often what the seller is looking at")
     if ask:
         psf = f" (${ask / lot:.2f}/sqft)" if lot else ""
         lines.append(f"Their ask: {_money(ask)}{psf}")
@@ -129,8 +132,12 @@ def deal_card(rec, band: dict, ask: float | None) -> str:
     owed = (rec.open_loans_balance or 0.0) + (rec.lien_amount or 0.0)
     if owed:
         lines.append(f"Liens/loans: {_money(owed)}")
-    lines.append(f"Your band: open {_money(band['opening_offer'])}, "
-                 f"ceiling {_money(band['max_offer'])} (never quote the ceiling)")
+    if band.get("opening_offer"):
+        lines.append(f"Your band: open {_money(band['opening_offer'])}, "
+                     f"ceiling {_money(band['max_offer'])} (never quote the ceiling)")
+    else:
+        lines.append(f"No auto-band — escalated ({band.get('escalate_reason')}); "
+                     "price it manually if worth pursuing")
     lines += [
         "",
         "Verify before you counter:",
@@ -180,8 +187,11 @@ def draft_and_notify(lead_email: str, reply_text: str, read: str, *, export_path
 
     band = compute_offer_range(rec)
     if band.get("escalate"):
-        push(header + f"\n⚠️ Escalate ({band['escalate_reason']}) — don't auto-offer; "
-             f"handle manually.\nProperty: {rec.address}")
+        # Still send the full card — the operator needs the numbers (assessed,
+        # est. value, liens) to judge the escalation, not just a reason code.
+        card = deal_card(rec, band, _parse_price(read))
+        push(header + f"\n⚠️ Escalate ({band['escalate_reason']}) — no auto-offer; "
+             "your call.\n\n" + card)
         return {"drafted": False, "reason": band["escalate_reason"]}
 
     try:
