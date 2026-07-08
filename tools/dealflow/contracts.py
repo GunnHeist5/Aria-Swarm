@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import json
 import os
+import time
 import urllib.error
 import urllib.request
 from pathlib import Path
@@ -85,25 +86,40 @@ def build_fields(deal: dict) -> dict:
 
 
 def create_and_send(deal: dict, *, api_key: str, template_id: str,
-                    http_request=_request) -> dict:
+                    http_request=_request, sleep=time.sleep) -> dict:
     """Create the document from the template and send it for e-sign.
 
-    Mirrors Muffin's create→send (``template_id`` + ``fields`` payload). Returns
-    ``{ok, document_id, status_code, detail}``.
+    Live-API verified specifics (the original Muffin port had these wrong):
+      * the create payload key is ``template_uuid`` (``template_id`` -> 400);
+      * values fill via ``tokens`` ({{placeholders}}), not a ``fields`` map;
+      * recipient roles must match the template's actual roles — this template
+        uses ``Client`` (the seller) and ``Justin`` (the buyer signer), both
+        env-overridable;
+      * creation is async — poll until ``document.draft`` before sending.
+
+    Returns ``{ok, document_id, status_code, detail}``.
     """
 
     fields = build_fields(deal)
+    seller_role = os.environ.get("PANDADOC_SELLER_ROLE", "Client")
+    buyer_role = os.environ.get("PANDADOC_BUYER_ROLE", "Justin")
+    buyer_email = os.environ.get("PANDADOC_BUYER_EMAIL", fields["buyer_email"])
+
+    recipients = [{
+        "email": fields["seller_email"],
+        "first_name": (fields["seller_name"].split() or [""])[0],
+        "last_name": " ".join(fields["seller_name"].split()[1:]),
+        "role": seller_role,
+    }]
+    if buyer_email:  # the buyer-side signer (a template role, so it must be filled)
+        recipients.append({"email": buyer_email, "first_name": "Justin",
+                           "last_name": "Yi", "role": buyer_role})
+
     payload = {
         "name": f"Purchase Agreement — {fields['property_address'] or 'Property'}",
-        "template_id": template_id,
-        "recipients": [{
-            "email": fields["seller_email"],
-            "first_name": (fields["seller_name"].split() or [""])[0],
-            "last_name": " ".join(fields["seller_name"].split()[1:]),
-            "role": "Seller",
-        }],
-        "fields": fields,
-        "options": {"send_completed_email": False},
+        "template_uuid": template_id,
+        "recipients": recipients,
+        "tokens": [{"name": k, "value": str(v)} for k, v in fields.items()],
         "metadata": {"deal_id": deal.get("deal_id")},
     }
     status, resp = http_request("POST", f"{_BASE}/documents", payload, api_key)
@@ -111,6 +127,14 @@ def create_and_send(deal: dict, *, api_key: str, template_id: str,
         return {"ok": False, "document_id": None, "status_code": status, "detail": resp[:300]}
 
     doc_id = json.loads(resp or "{}").get("id")
+
+    # Creation is async: sending while status is document.uploaded returns 409.
+    for _ in range(15):
+        s, b = http_request("GET", f"{_BASE}/documents/{doc_id}", None, api_key)
+        if s == 200 and json.loads(b or "{}").get("status") == "document.draft":
+            break
+        sleep(2)
+
     s2, r2 = http_request(
         "POST", f"{_BASE}/documents/{doc_id}/send",
         {"message": "Please review and sign your cash purchase agreement.", "silent": False},
@@ -148,11 +172,15 @@ def check_setup(*, http_request=_request) -> dict:
     out["ok"] = True
     out["template_name"] = data.get("name")
     out["roles"] = [r.get("name") for r in (data.get("roles") or [])]
-    template_fields = {(f.get("merge_field") or f.get("name") or "")
-                       for f in (data.get("fields") or [])}
+    # Templates fill via tokens ({{placeholders}}); fields are form inputs.
+    token_names = {str(t.get("name") or "") for t in (data.get("tokens") or [])}
+    field_names = {(f.get("merge_field") or f.get("name") or "")
+                   for f in (data.get("fields") or [])}
     ours = set(build_fields({}))
-    out["fields_matched"] = sorted(ours & template_fields)
-    out["fields_not_in_template"] = sorted(ours - template_fields)
+    out["template_tokens"] = sorted(n for n in token_names if n)
+    out["template_fields"] = sorted(n for n in field_names if n)
+    out["tokens_matched"] = sorted(ours & token_names)
+    out["unmatched_ours"] = sorted(ours - token_names - field_names)
     return out
 
 

@@ -6,6 +6,7 @@ Run: python -m tools.dealflow.test_dealflow
 from __future__ import annotations
 
 import importlib
+import json
 import os
 import tempfile
 
@@ -187,29 +188,61 @@ def test_contracts_create_and_send_ok():
     calls = []
 
     def stub(method, url, payload, key):
-        calls.append((method, url))
-        if url.endswith("/documents"):
+        calls.append((method, url, payload))
+        if method == "POST" and url.endswith("/documents"):
             return 201, '{"id": "DOC9"}'
+        if method == "GET":
+            return 200, '{"status": "document.draft"}'
         return 200, '{"status": "sent"}'
 
     res = contracts.create_and_send({**DEAL, "deal_id": "D1"}, api_key="k",
-                                    template_id="tpl", http_request=stub)
+                                    template_id="tpl", http_request=stub,
+                                    sleep=lambda s: None)
     assert res["ok"] and res["document_id"] == "DOC9"
-    assert calls[0][0] == "POST" and calls[0][1].endswith("/documents")
-    assert calls[1][1].endswith("/DOC9/send")
+    create = calls[0][2]
+    # live-API shape: template_uuid + tokens + both template roles filled
+    assert create["template_uuid"] == "tpl"
+    assert {"name": "purchase_price", "value": "9000"} in create["tokens"]
+    roles = [r["role"] for r in create["recipients"]]
+    assert roles == ["Client", "Justin"]
+    assert create["recipients"][0]["email"] == "jane@gmail.com"
+    assert calls[1][0] == "GET"  # waited for document.draft
+    assert calls[-1][1].endswith("/DOC9/send")
+
+
+def test_contracts_send_waits_out_processing():
+    from . import contracts
+    states = iter(["document.uploaded", "document.uploaded", "document.draft"])
+    calls = []
+
+    def stub(method, url, payload, key):
+        calls.append(method)
+        if method == "POST" and url.endswith("/documents"):
+            return 201, '{"id": "DOC9"}'
+        if method == "GET":
+            return 200, json.dumps({"status": next(states)})
+        return 200, "{}"
+
+    res = contracts.create_and_send({**DEAL, "deal_id": "D1"}, api_key="k",
+                                    template_id="tpl", http_request=stub,
+                                    sleep=lambda s: None)
+    assert res["ok"]
+    assert calls.count("GET") == 3  # polled until draft, then sent
 
 
 def test_contracts_check_setup():
     from . import contracts
     os.environ["PANDADOC_API_KEY"] = "k-test"
     try:
-        body = ('{"name": "Purchase Agreement", "roles": [{"name": "Seller"}], '
-                '"fields": [{"merge_field": "property_address"}, '
-                '{"merge_field": "purchase_price"}]}')
+        body = ('{"name": "Purchase Agreement", "roles": [{"name": "Client"}], '
+                '"tokens": [{"name": "property_address"}, '
+                '{"name": "purchase_price"}], '
+                '"fields": [{"merge_field": "signature_1"}]}')
         rep = contracts.check_setup(http_request=lambda *a: (200, body))
         assert rep["ok"] and rep["api_key_source"] == "env"
-        assert "property_address" in rep["fields_matched"]
-        assert "seller_name" in rep["fields_not_in_template"]
+        assert rep["tokens_matched"] == ["property_address", "purchase_price"]
+        assert "seller_name" in rep["unmatched_ours"]
+        assert rep["template_fields"] == ["signature_1"]
         bad = contracts.check_setup(http_request=lambda *a: (401, "denied"))
         assert not bad["ok"] and bad["status_code"] == 401
     finally:
@@ -224,15 +257,18 @@ def test_contracts_test_send_builds_test_deal():
 
         def stub(method, url, payload, key):
             payloads.append((url, payload))
-            if url.endswith("/documents"):
+            if method == "POST" and url.endswith("/documents"):
                 return 201, '{"id": "DOCX"}'
+            if method == "GET":
+                return 200, '{"status": "document.draft"}'
             return 200, "{}"
 
         res = contracts.test_send("me@example.com", http_request=stub)
         assert res["ok"] and res["document_id"] == "DOCX"
         create = payloads[0][1]
         assert create["recipients"][0]["email"] == "me@example.com"
-        assert "SELF-TEST" in create["fields"]["property_address"]
+        tokens = {t["name"]: t["value"] for t in create["tokens"]}
+        assert "SELF-TEST" in tokens["property_address"]
     finally:
         del os.environ["PANDADOC_API_KEY"]
 
