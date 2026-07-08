@@ -36,7 +36,11 @@ an Accept/Decline prompt — a contract goes out ONLY after they tap Accept), an
 suppress an opted-out address. You cannot send emails — the operator sends from \
 Instantly; when they need email text, write it for them (anchored at the \
 opening number, never stating or exceeding the ceiling). Numbers from tools \
-beat numbers from memory."""
+beat numbers from memory. Deal red flags to enforce: never confirm a buyer or \
+send an assignment before the seller's purchase agreement is signed; a buyer \
+asking for a 50% equity split / silent-partner arrangement is a reject (use \
+MaxDispo's fee-only model instead); past Day 9 with no confirmed buyer, the \
+play is cancel via the contingency, not extend."""
 
 SPECS = [
     {
@@ -79,6 +83,25 @@ SPECS = [
             "type": "object",
             "properties": {"email": {"type": "string"}},
             "required": ["email"],
+        },
+    },
+    {
+        "name": "confirm_buyer",
+        "description": "A buyer is locked in for a signed deal. Records the "
+                       "buyer, starts wire tracking, and sends the operator the "
+                       "Accept/Decline prompt for the Assignment Agreement. "
+                       "The assignment is only sent after they tap Accept.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "deal_id": {"type": "string"},
+                "buyer_name": {"type": "string"},
+                "buyer_email": {"type": "string"},
+                "assignment_fee": {"type": "number"},
+                "earnest_posted": {"type": "boolean",
+                                   "description": "has the buyer posted earnest money?"},
+            },
+            "required": ["deal_id", "buyer_name", "buyer_email", "assignment_fee"],
         },
     },
 ]
@@ -188,6 +211,24 @@ class Toolbox:
         except Exception:  # noqa: BLE001
             removed = None
         return {"suppressed": True, "removed_from_campaign": bool(removed)}
+
+    def confirm_buyer(self, deal_id: str, buyer_name: str, buyer_email: str,
+                      assignment_fee: float, earnest_posted: bool = False) -> dict:
+        result = self.service.on_buyer_confirmed(
+            deal_id, buyer_name, buyer_email, assignment_fee,
+            token=self.token, chat_id=self.chat_id)
+        if result.get("ok"):
+            # Best-effort: also start the dispo wire clock in the swarm.
+            try:
+                from tools.muffin_bridge import notify_buyer_confirmed
+
+                notify_buyer_confirmed(deal_id, buyer_name,
+                                       earnest_posted=earnest_posted, detach=True)
+            except Exception:  # noqa: BLE001
+                pass
+            result["note"] = ("Assignment Accept/Decline prompt sent — the "
+                              "agreement goes out only on Accept")
+        return result
 
 
 def _content(resp) -> str:

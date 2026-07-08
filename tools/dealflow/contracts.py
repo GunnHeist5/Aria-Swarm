@@ -52,6 +52,12 @@ def resolve_template_id() -> str:
     return os.environ.get("PANDADOC_PURCHASE_TEMPLATE_ID") or _DEFAULT_TEMPLATE
 
 
+def resolve_assignment_template_id() -> str:
+    """Assignment (buyer) template — no default; must be set explicitly."""
+
+    return os.environ.get("PANDADOC_ASSIGNMENT_TEMPLATE_ID", "")
+
+
 def _request(method: str, url: str, payload: dict | None, key: str) -> tuple[int, str]:
     req = urllib.request.Request(
         url,
@@ -122,6 +128,69 @@ def create_and_send(deal: dict, *, api_key: str, template_id: str,
         "tokens": [{"name": k, "value": str(v)} for k, v in fields.items()],
         "metadata": {"deal_id": deal.get("deal_id")},
     }
+    return _dispatch_document(
+        payload, api_key=api_key, http_request=http_request, sleep=sleep,
+        message="Please review and sign your cash purchase agreement.")
+
+
+def build_assignment_fields(deal: dict) -> dict:
+    """Assignment Agreement (buyer contract) tokens — Muffin's buyer protocol."""
+
+    return {
+        "property_address": deal.get("property_address") or deal.get("address", ""),
+        "property_city": deal.get("city", ""),
+        "property_state": deal.get("state", ""),
+        "property_zip": deal.get("zip", ""),
+        "buyer_name": str(deal.get("buyer_name", "")),
+        "buyer_email": deal.get("buyer_email", ""),
+        "assignment_fee": str(deal.get("assignment_fee", "")),
+        "purchase_price": str(deal.get("agreed_price") or deal.get("offer_price", "")),
+        "closing_date": deal.get("closing_date", ""),
+        "seller_name": str(deal.get("seller_name", "")),
+        "assignor_name": "ARIA Capital LLC",
+        "assignor_email": "justin@ariacapital.tech",
+    }
+
+
+def create_and_send_assignment(deal: dict, *, api_key: str, template_id: str,
+                               http_request=_request, sleep=time.sleep) -> dict:
+    """Send the Assignment Agreement to the confirmed buyer for e-sign."""
+
+    if not template_id:
+        return {"ok": False, "document_id": None, "status_code": 0,
+                "detail": "PANDADOC_ASSIGNMENT_TEMPLATE_ID not set"}
+    fields = build_assignment_fields(deal)
+    buyer_role = os.environ.get("PANDADOC_ASSIGNMENT_BUYER_ROLE", "Client")
+    assignor_role = os.environ.get("PANDADOC_ASSIGNMENT_ASSIGNOR_ROLE", "Justin")
+    assignor_email = os.environ.get("PANDADOC_BUYER_EMAIL", fields["assignor_email"])
+
+    buyer_names = fields["buyer_name"].split() or [""]
+    recipients = [{
+        "email": fields["buyer_email"],
+        "first_name": buyer_names[0],
+        "last_name": " ".join(buyer_names[1:]),
+        "role": buyer_role,
+    }]
+    if assignor_email:
+        recipients.append({"email": assignor_email, "first_name": "Justin",
+                           "last_name": "Yi", "role": assignor_role})
+
+    payload = {
+        "name": f"Assignment Agreement — {fields['property_address'] or 'Property'}",
+        "template_uuid": template_id,
+        "recipients": recipients,
+        "tokens": [{"name": k, "value": str(v)} for k, v in fields.items()],
+        "metadata": {"deal_id": deal.get("deal_id"), "kind": "assignment"},
+    }
+    return _dispatch_document(
+        payload, api_key=api_key, http_request=http_request, sleep=sleep,
+        message="Please review and sign the assignment agreement.")
+
+
+def _dispatch_document(payload: dict, *, api_key: str, http_request, sleep,
+                       message: str) -> dict:
+    """Shared create -> poll-to-draft -> send path (live-API verified)."""
+
     status, resp = http_request("POST", f"{_BASE}/documents", payload, api_key)
     if status != 201:
         return {"ok": False, "document_id": None, "status_code": status, "detail": resp[:300]}
@@ -137,7 +206,7 @@ def create_and_send(deal: dict, *, api_key: str, template_id: str,
 
     s2, r2 = http_request(
         "POST", f"{_BASE}/documents/{doc_id}/send",
-        {"message": "Please review and sign your cash purchase agreement.", "silent": False},
+        {"message": message, "silent": False},
         api_key,
     )
     return {"ok": 200 <= s2 < 300, "document_id": doc_id, "status_code": s2, "detail": r2[:300]}
@@ -148,17 +217,21 @@ def create_and_send(deal: dict, *, api_key: str, template_id: str,
 # ---------------------------------------------------------------------------
 
 
-def check_setup(*, http_request=_request) -> dict:
+def check_setup(*, http_request=_request, template_id: str | None = None,
+                our_fields: dict | None = None) -> dict:
     """Validate the key + template against the live PandaDoc API (no doc made)."""
 
     key = resolve_api_key()
     source = ("env" if os.environ.get("PANDADOC_API_KEY")
               else "muffin_vault_FALLBACK (COMPROMISED — rotate!)" if key
               else "MISSING")
-    template_id = resolve_template_id()
+    template_id = template_id if template_id is not None else resolve_template_id()
     out = {"api_key_source": source, "template_id": template_id, "ok": False}
     if not key:
         out["detail"] = "set PANDADOC_API_KEY in .env"
+        return out
+    if not template_id:
+        out["detail"] = "template id not set"
         return out
 
     status, body = http_request("GET", f"{_BASE}/templates/{template_id}/details",
@@ -176,7 +249,7 @@ def check_setup(*, http_request=_request) -> dict:
     token_names = {str(t.get("name") or "") for t in (data.get("tokens") or [])}
     field_names = {(f.get("merge_field") or f.get("name") or "")
                    for f in (data.get("fields") or [])}
-    ours = set(build_fields({}))
+    ours = set(our_fields if our_fields is not None else build_fields({}))
     out["template_tokens"] = sorted(n for n in token_names if n)
     out["template_fields"] = sorted(n for n in field_names if n)
     out["tokens_matched"] = sorted(ours & token_names)
@@ -213,13 +286,21 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="PandaDoc contract-path self-check.")
     group = parser.add_mutually_exclusive_group(required=True)
     group.add_argument("--check", action="store_true",
-                       help="validate the API key + template (creates nothing)")
+                       help="validate the API key + purchase template (creates nothing)")
+    group.add_argument("--check-assignment", action="store_true",
+                       help="validate the assignment (buyer) template")
     group.add_argument("--test-send", metavar="EMAIL",
                        help="send a real TEST agreement to this address (yourself)")
     args = parser.parse_args(argv)
 
     if args.check:
         report = check_setup()
+        print(json.dumps(report, indent=2))
+        return 0 if report["ok"] else 1
+
+    if args.check_assignment:
+        report = check_setup(template_id=resolve_assignment_template_id(),
+                             our_fields=build_assignment_fields({}))
         print(json.dumps(report, indent=2))
         return 0 if report["ok"] else 1
 

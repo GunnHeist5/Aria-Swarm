@@ -49,6 +49,32 @@ def format_deal(deal: dict) -> str:
     )
 
 
+def format_assignment(deal: dict) -> str:
+    return (
+        "🤝 *Buyer locked in — approve to send the Assignment Agreement*\n\n"
+        f"*Property:* {deal.get('property_address', '?')}\n"
+        f"*Buyer:* {deal.get('buyer_name', '?')} ({deal.get('buyer_email', '?')})\n"
+        f"*Assignment fee:* {_money(deal.get('assignment_fee'))}\n"
+        f"*Seller price:* {_money(deal.get('agreed_price'))}\n\n"
+        "Tap *Accept* to email the assignment agreement to the buyer, or *Decline*."
+    )
+
+
+def send_assignment_approval(deal: dict, *, token: str, chat_id: str,
+                             http_post=_post) -> tuple[int, str]:
+    payload = {
+        "chat_id": chat_id,
+        "text": format_assignment(deal),
+        "parse_mode": "Markdown",
+        "reply_markup": {"inline_keyboard": [[
+            {"text": "✅ Accept & send assignment",
+             "callback_data": f"accept_assign:{deal['deal_id']}"},
+            {"text": "❌ Decline", "callback_data": f"decline_assign:{deal['deal_id']}"},
+        ]]},
+    }
+    return http_post(_API.format(token=token, method="sendMessage"), payload)
+
+
 def send_approval(deal: dict, *, token: str, chat_id: str, http_post=_post) -> tuple[int, str]:
     payload = {
         "chat_id": chat_id,

@@ -16,10 +16,15 @@ from . import notify
 class StubNotify:
     def __init__(self):
         self.approvals = []
+        self.assignment_approvals = []
         self.texts = []
 
     def send_approval(self, deal, *, token, chat_id, **_):
         self.approvals.append(deal)
+        return 200, "ok"
+
+    def send_assignment_approval(self, deal, *, token, chat_id, **_):
+        self.assignment_approvals.append(deal)
         return 200, "ok"
 
     def send_text(self, text, *, token, chat_id, **_):
@@ -31,12 +36,19 @@ class StubContractor:
     def __init__(self, ok=True):
         self.ok = ok
         self.calls = []
+        self.assignment_calls = []
 
     def create_and_send(self, deal, *, api_key, template_id, **_):
         self.calls.append(deal)
         if self.ok:
             return {"ok": True, "document_id": "DOC1", "status_code": 201, "detail": ""}
         return {"ok": False, "document_id": None, "status_code": 400, "detail": "bad template"}
+
+    def create_and_send_assignment(self, deal, *, api_key, template_id, **_):
+        self.assignment_calls.append((deal, template_id))
+        if self.ok:
+            return {"ok": True, "document_id": "ADOC1", "status_code": 201, "detail": ""}
+        return {"ok": False, "document_id": None, "status_code": 400, "detail": "no template"}
 
 
 def _svc():
@@ -145,6 +157,86 @@ def test_send_failure_reported():
                           template_id="tpl", notifier=n, contractor=c)
     assert res["status"] == "send_failed"
     assert any("Couldn't send" in t for t in n.texts)
+
+
+def test_buyer_confirmed_to_assignment_signed():
+    svc = _svc()
+    n, c = StubNotify(), StubContractor(ok=True)
+    deal_id = svc.on_deal_agreed(DEAL, token="t", chat_id="c", notifier=n)
+    # buyer locked in -> assignment Accept/Decline prompt (nothing sent yet)
+    res = svc.on_buyer_confirmed(deal_id, "Cash Buyers LLC", "buyer@x.com", 15000,
+                                 token="t", chat_id="c", notifier=n)
+    assert res["ok"] and res["status"] == "pending_approval"
+    assert len(n.assignment_approvals) == 1
+    assert c.assignment_calls == []
+    # Accept -> assignment sent to the buyer
+    dec = svc.on_assignment_decision("accept_assign", deal_id, token="t",
+                                     chat_id="c", api_key="k", template_id="atpl",
+                                     notifier=n, contractor=c)
+    assert dec["status"] == "contract_sent" and dec["document_id"] == "ADOC1"
+    sent_deal, tpl = c.assignment_calls[0]
+    assert tpl == "atpl" and sent_deal["buyer_email"] == "buyer@x.com"
+    assert sent_deal["assignment_fee"] == 15000
+    # idempotent
+    again = svc.on_assignment_decision("accept_assign", deal_id, token="t",
+                                       chat_id="c", api_key="k", template_id="atpl",
+                                       notifier=n, contractor=c)
+    assert again["reason"] == "already_handled" and len(c.assignment_calls) == 1
+    # buyer signs -> assignment marked signed, wire-instructions ping
+    deal = svc.on_signed("ADOC1", token="t", chat_id="c", notifier=n)
+    assert deal["assignment_status"] == "signed"
+    assert any("ASSIGNMENT SIGNED" in t for t in n.texts)
+
+
+def test_assignment_decline_sends_nothing():
+    svc = _svc()
+    n, c = StubNotify(), StubContractor()
+    deal_id = svc.on_deal_agreed(DEAL, token="t", chat_id="c", notifier=n)
+    svc.on_buyer_confirmed(deal_id, "B LLC", "b@x.com", 9000,
+                           token="t", chat_id="c", notifier=n)
+    res = svc.on_assignment_decision("decline_assign", deal_id, token="t",
+                                     chat_id="c", api_key="k", template_id="atpl",
+                                     notifier=n, contractor=c)
+    assert res["status"] == "declined" and c.assignment_calls == []
+
+
+def test_contracts_assignment_payload():
+    from . import contracts
+    payloads = []
+
+    def stub(method, url, payload, key):
+        payloads.append((method, url, payload))
+        if method == "POST" and url.endswith("/documents"):
+            return 201, '{"id": "ADOC"}'
+        if method == "GET":
+            return 200, '{"status": "document.draft"}'
+        return 200, "{}"
+
+    deal = {**DEAL, "deal_id": "D1", "buyer_name": "Cash Buyers LLC",
+            "buyer_email": "buyer@x.com", "assignment_fee": 15000}
+    res = contracts.create_and_send_assignment(deal, api_key="k",
+                                               template_id="atpl",
+                                               http_request=stub,
+                                               sleep=lambda s: None)
+    assert res["ok"] and res["document_id"] == "ADOC"
+    create = payloads[0][2]
+    assert create["template_uuid"] == "atpl"
+    assert create["recipients"][0]["email"] == "buyer@x.com"
+    tokens = {t["name"]: t["value"] for t in create["tokens"]}
+    assert tokens["assignment_fee"] == "15000"
+    assert tokens["purchase_price"] == "9000"
+    # missing template id fails closed with a clear message
+    bad = contracts.create_and_send_assignment(deal, api_key="k", template_id="",
+                                               http_request=stub)
+    assert not bad["ok"] and "PANDADOC_ASSIGNMENT_TEMPLATE_ID" in bad["detail"]
+
+
+def test_format_assignment_has_fields():
+    text = notify.format_assignment({**DEAL, "deal_id": "D1",
+                                     "buyer_name": "Cash Buyers LLC",
+                                     "buyer_email": "buyer@x.com",
+                                     "assignment_fee": 15000})
+    assert "Cash Buyers LLC" in text and "$15,000" in text and "Beulah" in text
 
 
 def test_signed_marks_and_fires():

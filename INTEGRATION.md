@@ -238,6 +238,20 @@ Draft registers: when a seller's ask exceeds **2× the ceiling**, the auto-draft
 switches from the warm template to a candid, number-forward register (state the
 opening, ground it in assessed value, leave the door open, don't chase).
 
+## Assignment agreement — the buyer contract (Muffin's buyer protocol)
+
+Mirrors the purchase-agreement HITL exactly. When a buyer is locked in, tell
+the deal chat — "buyer confirmed for D42: Cash Buyers LLC, buyer@x.com, fee
+15k" — or call `service.on_buyer_confirmed(...)`. That records the buyer,
+starts the dispo wire clock, and pushes an Accept/Decline prompt; **Accept**
+sends the Assignment Agreement to the buyer via PandaDoc (fee, price, address,
+closing date auto-filled). The buyer signing pings you to send wire
+instructions to the title company.
+
+Env: `PANDADOC_ASSIGNMENT_TEMPLATE_ID` (required, no default), role overrides
+`PANDADOC_ASSIGNMENT_BUYER_ROLE` / `PANDADOC_ASSIGNMENT_ASSIGNOR_ROLE`.
+Validate with `python -m tools.dealflow.contracts --check-assignment`.
+
 ## Exit codes
 
 `0` done · `1` cycle error (state preserved) · `2` frozen awaiting HITL

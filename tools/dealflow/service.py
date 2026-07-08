@@ -132,6 +132,75 @@ def on_decision(action: str, deal_id: str, *, token: str, chat_id: str,
     return {"ok": False, "reason": "unknown_action"}
 
 
+def on_buyer_confirmed(deal_id: str, buyer_name: str, buyer_email: str,
+                       assignment_fee, *, token: str, chat_id: str,
+                       notifier=_notify) -> dict:
+    """A buyer is locked in -> push the Accept/Decline assignment prompt.
+
+    The assignment agreement (buyer contract) is CRITICAL_GATE like the
+    purchase agreement: nothing is sent until the operator taps Accept.
+    """
+
+    store = _load()
+    deal = store.get(deal_id)
+    if not deal:
+        return {"ok": False, "reason": "unknown_deal"}
+    if deal.get("assignment_status") in ("contract_sent", "signed"):
+        return {"ok": True, "reason": "already_handled",
+                "status": deal["assignment_status"]}
+    deal.update({
+        "buyer_name": buyer_name,
+        "buyer_email": buyer_email,
+        "assignment_fee": assignment_fee,
+        "assignment_status": "pending_approval",
+    })
+    _save(store)
+    notifier.send_assignment_approval(deal, token=token, chat_id=chat_id)
+    return {"ok": True, "status": "pending_approval", "deal_id": deal_id}
+
+
+def on_assignment_decision(action: str, deal_id: str, *, token: str, chat_id: str,
+                           api_key: str, template_id: str,
+                           notifier=_notify, contractor=_contracts) -> dict:
+    """Handle the assignment Accept/Decline. Idempotent per deal."""
+
+    store = _load()
+    deal = store.get(deal_id)
+    if not deal:
+        return {"ok": False, "reason": "unknown_deal"}
+    if deal.get("assignment_status") != "pending_approval":
+        return {"ok": True, "reason": "already_handled",
+                "status": deal.get("assignment_status")}
+
+    if action == "decline_assign":
+        deal["assignment_status"] = "declined"
+        _save(store)
+        notifier.send_text(
+            f"❌ Declined — no assignment sent for {deal.get('property_address', '?')}.",
+            token=token, chat_id=chat_id)
+        return {"ok": True, "status": "declined"}
+
+    result = contractor.create_and_send_assignment(
+        deal, api_key=api_key, template_id=template_id)
+    if result["ok"]:
+        deal["assignment_status"] = "contract_sent"
+        deal["assignment_document_id"] = result["document_id"]
+        _save(store)
+        notifier.send_text(
+            f"✅ Assignment agreement sent to {deal.get('buyer_name', 'the buyer')} "
+            f"({deal.get('buyer_email', '?')}) for {deal.get('property_address', '?')} — "
+            f"fee ${deal.get('assignment_fee', '?')}. You'll get a ping when they sign.",
+            token=token, chat_id=chat_id)
+        return {"ok": True, "status": "contract_sent",
+                "document_id": result["document_id"]}
+    deal["assignment_status"] = "send_failed"
+    _save(store)
+    notifier.send_text(
+        f"⚠️ Couldn't send the assignment (PandaDoc {result['status_code']}). "
+        f"{result['detail']}", token=token, chat_id=chat_id)
+    return {"ok": False, "status": "send_failed", "detail": result["detail"]}
+
+
 def on_signed(document_id: str, *, token: str, chat_id: str,
               notifier=_notify, fire_event=None) -> dict | None:
     """PandaDoc reports a completed doc -> mark signed, notify, fire contract_signed."""
@@ -146,6 +215,16 @@ def on_signed(document_id: str, *, token: str, chat_id: str,
                 f"${deal.get('agreed_price', '?')}. Next: submit to CLOSED Title.",
                 token=token, chat_id=chat_id)
             (fire_event or _fire_contract_signed)(deal)
+            return deal
+        if deal.get("assignment_document_id") == document_id:
+            deal["assignment_status"] = "signed"
+            _save(store)
+            notifier.send_text(
+                f"🎉 ASSIGNMENT SIGNED — {deal.get('buyer_name', '?')} for "
+                f"{deal.get('property_address', '?')} (fee "
+                f"${deal.get('assignment_fee', '?')}). Next: wire instructions "
+                "to the title company.",
+                token=token, chat_id=chat_id)
             return deal
     return None
 

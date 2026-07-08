@@ -65,11 +65,17 @@ class ScriptedLLM:
 class StubService:
     def __init__(self):
         self.agreed = []
+        self.buyers = []
         self.store = {}
 
     def on_deal_agreed(self, deal, *, token, chat_id):
         self.agreed.append((deal, token, chat_id))
         return "D42"
+
+    def on_buyer_confirmed(self, deal_id, buyer_name, buyer_email, fee, *,
+                           token, chat_id):
+        self.buyers.append((deal_id, buyer_name, buyer_email, fee))
+        return {"ok": True, "status": "pending_approval", "deal_id": deal_id}
 
     def _load(self):
         return self.store
@@ -157,6 +163,15 @@ def test_list_pending_deals():
                         "contact": "h@x.com"}}
     res = _toolbox(service=svc).run("list_pending_deals", {})
     assert res["count"] == 1 and res["deals"][0]["status"] == "pending_approval"
+
+
+def test_confirm_buyer_tool():
+    svc = StubService()
+    res = _toolbox(service=svc).run("confirm_buyer", {
+        "deal_id": "D42", "buyer_name": "Cash Buyers LLC",
+        "buyer_email": "buyer@x.com", "assignment_fee": 15000})
+    assert res["ok"] and "Accept" in res["note"]
+    assert svc.buyers == [("D42", "Cash Buyers LLC", "buyer@x.com", 15000)]
 
 
 def test_step_limit():

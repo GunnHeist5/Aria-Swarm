@@ -93,9 +93,14 @@ async def telegram_callback(
         return {"ok": True, "result": result}
 
     api_key, template_id = _pandadoc()
-    result = service.on_decision(
-        action, deal_id, token=token, chat_id=chat_id,
-        api_key=api_key, template_id=template_id)
+    if action in ("accept_assign", "decline_assign"):
+        result = service.on_assignment_decision(
+            action, deal_id, token=token, chat_id=chat_id, api_key=api_key,
+            template_id=contracts.resolve_assignment_template_id())
+    else:
+        result = service.on_decision(
+            action, deal_id, token=token, chat_id=chat_id,
+            api_key=api_key, template_id=template_id)
     return {"ok": True, "result": result}
 
 
