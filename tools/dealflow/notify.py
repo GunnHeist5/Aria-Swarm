@@ -70,6 +70,26 @@ def send_text(text: str, *, token: str, chat_id: str,
     return http_post(_API.format(token=token, method="sendMessage"), payload)
 
 
+def send_with_buttons(text: str, buttons, *, token: str, chat_id: str,
+                      parse_mode: str | None = None, http_post=_post) -> tuple[int, str]:
+    """Send ``text`` with one row of inline buttons.
+
+    ``buttons`` is a list of ``(label, callback_data)`` tuples. Plain text by
+    default (parse_mode=None) so an LLM-drafted body can't break the send.
+    """
+
+    payload = {
+        "chat_id": chat_id,
+        "text": text,
+        "reply_markup": {"inline_keyboard": [
+            [{"text": label, "callback_data": data} for label, data in buttons]
+        ]},
+    }
+    if parse_mode:
+        payload["parse_mode"] = parse_mode
+    return http_post(_API.format(token=token, method="sendMessage"), payload)
+
+
 def answer_callback(callback_query_id: str, text: str, *, token: str, http_post=_post):
     return http_post(
         _API.format(token=token, method="answerCallbackQuery"),

@@ -13,9 +13,15 @@ from . import draft as D
 class StubNotify:
     def __init__(self):
         self.texts = []
+        self.buttons = None
 
     def send_text(self, text, *, token, chat_id, **_):
         self.texts.append(text)
+        return 200, "ok"
+
+    def send_with_buttons(self, text, buttons, *, token, chat_id, **_):
+        self.texts.append(text)
+        self.buttons = buttons
         return 200, "ok"
 
 
@@ -56,12 +62,28 @@ def test_priced_lead_gets_draft_pushed():
     res = D.draft_and_notify(
         "jane@gmail.com", "I'd take 40k", "hot · they want 40k · action: offer",
         export_path="ok", token="t", chat_id="c", llm=llm,
-        notifier=n, lookup_cls=StubLookup)
+        notifier=n, lookup_cls=StubLookup, proposer=lambda deal: "Dtest123")
     assert res["drafted"] is True
     assert len(n.texts) == 1
     assert "Draft reply" in n.texts[0] and "Beulah" in n.texts[0]
     # the LLM prompt carried the band and never the raw ceiling into the seller text
     assert "opening=" in llm.prompts[0] and "ceiling=" in llm.prompts[0]
+    # a clean lot gets the 'Deal agreed -> send contract' button wired to the deal
+    assert n.buttons and n.buttons[0][1] == "agree:Dtest123"
+    assert res["deal_id"] == "Dtest123"
+
+
+def test_proposer_receives_contract_fields():
+    captured = {}
+    n = StubNotify()
+    D.draft_and_notify(
+        "jane@gmail.com", "ok", "warm · none · respond",
+        export_path="ok", token="t", chat_id="c", llm=StubLLM(),
+        notifier=n, lookup_cls=StubLookup,
+        proposer=lambda deal: captured.update(deal) or "D1")
+    assert captured["contact"] == "jane@gmail.com"
+    assert captured["property_address"] == "3321 Beulah St"
+    assert captured["agreed_price"] == 91000  # anchored at the opening offer
 
 
 def test_unmatched_email_notifies_no_draft():

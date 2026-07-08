@@ -97,6 +97,37 @@ def test_decision_idempotent():
     assert len(c.calls) == 1  # not re-sent
 
 
+def test_propose_then_agree_pushes_approval():
+    svc = _svc()
+    n = StubNotify()
+    # Stage 1: the reply-draft push stashes a proposed deal (no notification).
+    deal_id = svc.propose_deal(DEAL)
+    assert svc._load()[deal_id]["status"] == "proposed"
+    assert n.approvals == []
+    # Stage 2: a 'Deal agreed' tap promotes it to the Accept/Decline prompt.
+    res = svc.on_agree(deal_id, token="t", chat_id="c", notifier=n)
+    assert res["status"] == "pending_approval"
+    assert len(n.approvals) == 1 and n.approvals[0]["deal_id"] == deal_id
+    # and Accept then dispatches the contract as usual
+    c = StubContractor(ok=True)
+    done = svc.on_decision("accept", deal_id, token="t", chat_id="c", api_key="k",
+                           template_id="tpl", notifier=n, contractor=c)
+    assert done["status"] == "contract_sent" and len(c.calls) == 1
+
+
+def test_propose_deal_idempotent():
+    svc = _svc()
+    a = svc.propose_deal(DEAL)
+    b = svc.propose_deal(DEAL)
+    assert a == b and len(svc._load()) == 1
+
+
+def test_agree_unknown_deal():
+    svc = _svc()
+    res = svc.on_agree("Dxxxx", token="t", chat_id="c", notifier=StubNotify())
+    assert res["reason"] == "unknown_deal"
+
+
 def test_unknown_deal():
     svc = _svc()
     res = svc.on_decision("accept", "Dxxxx", token="t", chat_id="c",

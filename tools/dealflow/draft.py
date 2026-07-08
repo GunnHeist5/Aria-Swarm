@@ -77,6 +77,15 @@ def _money(v) -> str:
         return str(v)
 
 
+def _owner_name(raw: dict) -> str:
+    """Best-effort seller name from the export's owner columns (for the contract)."""
+
+    raw = raw or {}
+    first = str(raw.get("Owner 1 First Name") or raw.get("Owner First Name") or "").strip()
+    last = str(raw.get("Owner 1 Last Name") or raw.get("Owner Last Name") or "").strip()
+    return " ".join(p for p in (first, last) if p)
+
+
 def _parse_price(text: str | None) -> float | None:
     """Pull a dollar figure out of the qualifier read (e.g. 'they want 75k')."""
 
@@ -134,8 +143,15 @@ def deal_card(rec, band: dict, ask: float | None) -> str:
 
 
 def draft_and_notify(lead_email: str, reply_text: str, read: str, *, export_path,
-                     token, chat_id, llm, notifier=_notify, lookup_cls=FileLookup) -> dict:
-    """Price the lot, draft a reply, and push it to Telegram. Never raises."""
+                     token, chat_id, llm, notifier=_notify, lookup_cls=FileLookup,
+                     proposer=None) -> dict:
+    """Price the lot, draft a reply, and push it to Telegram. Never raises.
+
+    On a clean, priceable lot the push carries a '✅ Send contract' button: when
+    the seller says yes, tapping it promotes the deal to the Accept/Decline
+    contract prompt (via ``service.propose_deal`` -> ``on_agree``). ``proposer``
+    is injected for offline tests; live it defaults to ``service.propose_deal``.
+    """
 
     header = f"📩 New reply from {lead_email}\nRead: {read}\n"
 
@@ -176,6 +192,36 @@ def draft_and_notify(lead_email: str, reply_text: str, read: str, *, export_path
         header + "\n" + card
         + "\n\n—— Draft reply (review & send from Instantly) ——\n"
         + draft
+        + "\n\nWhen they say yes on price, tap below to send the contract."
     )
-    push(msg)
-    return {"drafted": True, "band": band, "draft": draft, "card": card}
+
+    # Stash the deal behind the button so a later 'agreed' tap can fire the
+    # Accept/Decline contract prompt (anchored at the opening number).
+    deal_id = None
+    try:
+        if proposer is None:
+            from . import service as _service
+            proposer = _service.propose_deal
+        deal = {
+            "property_address": rec.address,
+            "city": rec.city,
+            "state": rec.state or "TX",
+            "zip": rec.zip,
+            "county": rec.county,
+            "seller_name": _owner_name(rec.raw),
+            "contact": lead_email,
+            "agreed_price": band["opening_offer"],
+        }
+        deal_id = proposer(deal)
+    except Exception:  # noqa: BLE001 — a stash failure must not drop the draft
+        deal_id = None
+
+    if deal_id:
+        buttons = [(f"✅ Deal agreed — send contract @ {_money(band['opening_offer'])}",
+                    f"agree:{deal_id}")]
+        notifier.send_with_buttons(msg, buttons, token=token, chat_id=chat_id,
+                                   parse_mode=None)
+    else:
+        push(msg)
+    return {"drafted": True, "band": band, "draft": draft, "card": card,
+            "deal_id": deal_id}

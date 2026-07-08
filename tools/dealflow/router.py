@@ -69,9 +69,16 @@ async def telegram_callback(
     if not deal_id:
         return {"ok": True, "ignored": "no_callback"}
     token, chat_id = _telegram()
-    api_key, template_id = _pandadoc()
     if cq_id and token:
         notify.answer_callback(cq_id, "Working on it…", token=token)
+
+    # A 'Deal agreed' tap on a reply-draft push promotes the proposed deal to
+    # the Accept/Decline contract prompt; accept/decline dispatch the contract.
+    if action == "agree":
+        result = service.on_agree(deal_id, token=token, chat_id=chat_id)
+        return {"ok": True, "result": result}
+
+    api_key, template_id = _pandadoc()
     result = service.on_decision(
         action, deal_id, token=token, chat_id=chat_id,
         api_key=api_key, template_id=template_id)

@@ -45,6 +45,39 @@ def _deal_id(deal: dict) -> str:
     return "D" + hashlib.sha256(basis.encode("utf-8")).hexdigest()[:10]
 
 
+def propose_deal(deal: dict) -> str:
+    """Store a not-yet-agreed deal (from the reply-draft push) so a later
+    'Deal agreed' tap can promote it to the Accept/Decline contract prompt.
+
+    Idempotent per deal_id (same property+price+contact re-proposes the same
+    record). Does NOT notify — this is the silent Stage-1 stash behind the button.
+    """
+
+    deal = dict(deal)
+    deal.setdefault("deal_id", _deal_id(deal))
+    deal.setdefault("status", "proposed")
+    store = _load()
+    store[deal["deal_id"]] = deal
+    _save(store)
+    return deal["deal_id"]
+
+
+def on_agree(deal_id: str, *, token: str, chat_id: str, notifier=_notify) -> dict:
+    """A 'Deal agreed' tap on a Stage-1 push -> send the Accept/Decline contract
+    prompt for the stored proposed deal. Idempotent once past pending_approval."""
+
+    store = _load()
+    deal = store.get(deal_id)
+    if not deal:
+        return {"ok": False, "reason": "unknown_deal"}
+    if deal.get("status") not in (None, "proposed", "pending_approval"):
+        return {"ok": True, "reason": "already_handled", "status": deal.get("status")}
+    deal["status"] = "pending_approval"
+    _save(store)
+    notifier.send_approval(deal, token=token, chat_id=chat_id)
+    return {"ok": True, "status": "pending_approval", "deal_id": deal_id}
+
+
 def on_deal_agreed(deal: dict, *, token: str, chat_id: str, notifier=_notify) -> str:
     """Store the pending deal and push the Telegram approval. Returns the deal_id."""
 
