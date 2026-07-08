@@ -304,6 +304,15 @@ def main(argv: list[str] | None = None) -> int:
         print(json.dumps(report, indent=2))
         return 0 if report["ok"] else 1
 
+    # Pre-flight: sending from a template with no matching tokens produces a
+    # contract with BLANK deal terms — say so loudly before creating anything.
+    pre = check_setup()
+    if pre.get("ok") and not pre.get("tokens_matched"):
+        print("⚠️  WARNING: the template has no matching variables — the document "
+              "will send, but the address/price/terms will NOT auto-fill.\n"
+              "    Add variables named exactly like our tokens (see "
+              "'unmatched_ours' in --check) to the template body first.\n")
+
     result = test_send(args.test_send)
     print(json.dumps(result, indent=2))
     if result["ok"]:
