@@ -8,9 +8,11 @@ from __future__ import annotations
 import os
 import tempfile
 
-# Point the deal-chat ledger at a temp file BEFORE importing draft (which
-# imports chat, which resolves its store path at import time).
-os.environ["DEAL_CHAT_STORE"] = os.path.join(tempfile.mkdtemp(), "chat.json")
+# Point the deal-chat + suppression ledgers at temp files BEFORE importing
+# draft (which imports chat, which resolves its store path at import time).
+_tmp = tempfile.mkdtemp()
+os.environ["DEAL_CHAT_STORE"] = os.path.join(_tmp, "chat.json")
+os.environ["SUPPRESSION_STORE"] = os.path.join(_tmp, "suppressed.json")
 
 from tools.dealdesk.lookup import PropertyRecord
 
@@ -134,6 +136,69 @@ def test_escalate_band_no_autodraft():
     assert "Assessed: $170,000" in n.texts[0]
     assert "No auto-band" in n.texts[0]
     assert "Draft reply" not in n.texts[0]  # but never a draft/button on escalations
+
+
+def test_is_opt_out_detection():
+    yes = ["STOP", "stop", "Please stop.", "STOP\n\nSent from my iPhone",
+           "unsubscribe", "Remove me from your list", "take me off your list",
+           "please stop emailing me", "do not contact me again", "opt out"]
+    no = ["stop by the lot anytime, gate's open",
+          "I want to stop paying taxes on this dirt — make me an offer",
+          "what's your offer?", "", None]
+    for t in yes:
+        assert D.is_opt_out(t), f"should be opt-out: {t!r}"
+    for t in no:
+        assert not D.is_opt_out(t), f"should NOT be opt-out: {t!r}"
+
+
+class StubSuppression:
+    def __init__(self):
+        self.entries = set()
+
+    def add(self, email):
+        self.entries.add(email.lower())
+
+    def contains(self, email):
+        return email.lower() in self.entries
+
+
+def test_stop_reply_suppresses_no_card_no_draft_no_button():
+    n, llm, sup = StubNotify(), StubLLM(), StubSuppression()
+    removed = []
+    res = D.draft_and_notify(
+        "jane@gmail.com", "STOP", "invalid · none · escalate",
+        export_path="ok", token="t", chat_id="c", llm=llm,
+        notifier=n, lookup_cls=StubLookup, remember=lambda *a, **k: None,
+        remover=lambda e: removed.append(e) or True, suppressor=sup)
+    assert res["reason"] == "opt_out" and res["removed"] is True
+    assert removed == ["jane@gmail.com"]
+    assert sup.contains("jane@gmail.com")
+    assert "OPT-OUT" in n.texts[0] and "Auto-removed" in n.texts[0]
+    # no pricing, no drafting, no button — and the LLM was never called
+    assert "Deal card" not in n.texts[0] and n.buttons is None
+    assert llm.prompts == []
+    # any later reply from the same address is refused
+    res2 = D.draft_and_notify(
+        "jane@gmail.com", "actually what would you pay?", "warm · none · respond",
+        export_path="ok", token="t", chat_id="c", llm=llm,
+        notifier=n, lookup_cls=StubLookup, remember=lambda *a, **k: None,
+        remover=lambda e: True, suppressor=sup)
+    assert res2["reason"] == "suppressed"
+    assert "opted out earlier" in n.texts[1] and llm.prompts == []
+
+
+def test_opt_out_removal_failure_still_suppresses():
+    n, sup = StubNotify(), StubSuppression()
+    def boom(email):
+        raise RuntimeError("instantly down")
+    res = D.draft_and_notify(
+        "jane@gmail.com", "unsubscribe", "invalid · none · escalate",
+        export_path="ok", token="t", chat_id="c", llm=StubLLM(),
+        notifier=n, lookup_cls=StubLookup, remember=lambda *a, **k: None,
+        remover=boom, suppressor=sup)
+    assert res["reason"] == "opt_out" and res["removed"] is False
+    assert sup.contains("jane@gmail.com")
+    assert "Couldn't auto-remove" in n.texts[0]
 
 
 def test_telegram_unconfigured_is_safe():

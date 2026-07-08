@@ -44,6 +44,7 @@ try:
 except ImportError:
     pass
 
+from . import suppression
 from .leadfile import parse_propstream, suppress, suppressed_emails
 from .secrets import SecretError, get_secret
 
@@ -113,12 +114,18 @@ def push_leads(
     no network call is made — the report shows what WOULD be pushed.
     """
 
-    batch = leads[:limit]
+    # Never (re-)load an opted-out address — CAN-SPAM, no exceptions. A fresh
+    # export can contain someone who replied STOP to an earlier campaign.
+    suppressed = suppression.load()
+    kept = [l for l in leads if l.get("email", "").lower() not in suppressed]
+
+    batch = kept[:limit]
     report = {
         "campaign_id": campaign_id,
         "dry_run": dry_run,
         "attempted": len(batch),
-        "held_by_limit": max(0, len(leads) - limit),
+        "held_by_limit": max(0, len(kept) - limit),
+        "suppressed_opt_outs": len(leads) - len(kept),
         "pushed": 0,
         "skipped_existing": 0,
         "errors": 0,
@@ -159,6 +166,25 @@ def push_leads(
         sleep(REQUEST_SPACING_S)
 
     return report
+
+
+def remove_lead_by_email(
+    email: str, *, api_key: str, campaign_id: str, http_request=_http_request,
+) -> bool | None:
+    """Delete one lead from the campaign (opt-out compliance).
+
+    Returns True on removal, False if the email isn't in the campaign, and
+    raises nothing above the caller's try (auth failures raise RuntimeError
+    from ``fetch_campaign_leads`` — the caller decides how loud to be).
+    """
+
+    leads = fetch_campaign_leads(api_key=api_key, campaign_id=campaign_id,
+                                 http_request=http_request)
+    lead_id = leads.get((email or "").lower())
+    if not lead_id:
+        return False
+    status, _ = http_request("DELETE", DELETE_URL.format(lead_id=lead_id), None, api_key)
+    return 200 <= status < 300
 
 
 # ---------------------------------------------------------------------------

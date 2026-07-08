@@ -16,9 +16,28 @@ import re
 
 from tools.dealdesk.lookup import FileLookup, _to_float
 from tools.dealdesk.pricing import compute_offer_range
+from tools.integrations import suppression
 
 from . import chat as _chat
 from . import notify as _notify
+
+# Opt-out is a legal state, not a triage judgment — detect it deterministically.
+# Strong phrases match anywhere; a bare "stop" only as the whole first line
+# (our outreach says 'reply "STOP"'), so "stop by the lot anytime" stays a lead.
+_OPT_OUT_STRONG = re.compile(
+    r"unsubscrib|remove me|take me off|opt[ -]?out"
+    r"|do not (contact|email|message)|don'?t (contact|email|message)"
+    r"|stop (email|contact|messag|send|reach)", re.I)
+_OPT_OUT_BARE_STOP = re.compile(r"^\W*(please\s+)?stop\W*$", re.I)
+
+
+def is_opt_out(text: str | None) -> bool:
+    if not text:
+        return False
+    if _OPT_OUT_STRONG.search(text):
+        return True
+    first_line = text.strip().splitlines()[0].strip()
+    return bool(_OPT_OUT_BARE_STOP.match(first_line))
 
 DRAFT_PROMPT = """You are Jessica Young, an acquisitions specialist at ARIA Capital, \
 replying by email to a landowner who responded to our cash-offer outreach for their \
@@ -164,9 +183,23 @@ def deal_card(rec, band: dict, ask: float | None) -> str:
     return "\n".join(lines)
 
 
+def _remove_from_instantly(email: str) -> bool | None:
+    """Best-effort: delete an opted-out lead from the live campaign."""
+
+    from tools.integrations.instantly import remove_lead_by_email
+    from tools.integrations.secrets import get_secret
+
+    api_key = get_secret("INSTANTLY_API_KEY")
+    campaign_id = get_secret("INSTANTLY_CAMPAIGN_ID")
+    if not (api_key and campaign_id):
+        return None
+    return remove_lead_by_email(email, api_key=api_key, campaign_id=campaign_id)
+
+
 def draft_and_notify(lead_email: str, reply_text: str, read: str, *, export_path,
                      token, chat_id, llm, notifier=_notify, lookup_cls=FileLookup,
-                     proposer=None, remember=None) -> dict:
+                     proposer=None, remember=None, remover=_remove_from_instantly,
+                     suppressor=suppression) -> dict:
     """Price the lot, draft a reply, and push it to Telegram. Never raises.
 
     On a clean, priceable lot the push carries a '✅ Send contract' button: when
@@ -196,6 +229,31 @@ def draft_and_notify(lead_email: str, reply_text: str, read: str, *, export_path
         print(f"[draft] telegram send status={status}"
               + ("" if status == 200 else f" body={str(body)[:200]}"))
         return status, body
+
+    # Opt-out is checked BEFORE anything else: no pricing, no card, no draft,
+    # no button — suppress, remove from the campaign, never contact again.
+    if is_opt_out(reply_text):
+        try:
+            suppressor.add(lead_email)
+        except Exception:  # noqa: BLE001
+            pass
+        try:
+            removed = remover(lead_email)
+        except Exception:  # noqa: BLE001
+            removed = None
+        note = ("Auto-removed from the Instantly campaign." if removed else
+                "Couldn't auto-remove — delete them from the campaign in Instantly.")
+        push(header + "\n🛑 OPT-OUT — suppressed. No reply, no offer, no further "
+             "contact, ever. " + note)
+        recall(address="(opted out — do not contact)", opt_out=True)
+        return {"drafted": False, "reason": "opt_out", "removed": bool(removed)}
+
+    try:
+        if suppressor.contains(lead_email):
+            push(header + "\n🛑 This address opted out earlier — do not contact.")
+            return {"drafted": False, "reason": "suppressed"}
+    except Exception:  # noqa: BLE001
+        pass
 
     rec = None
     try:
