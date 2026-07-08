@@ -61,6 +61,27 @@ def _strip_html(text: str) -> str:
     return _html.unescape(re.sub(r"[ \t]+", " ", text)).strip()
 
 
+# The reply body carries the whole quoted thread — including OUR outreach email.
+# Cut at the first quote marker so the qualifier only reads the seller's words.
+_QUOTE_MARKERS = (
+    re.compile(r"\n\s*>"),                             # "> quoted line"
+    re.compile(r"\n\s*On .{0,140}?wrote:"),            # Gmail/Apple attribution
+    re.compile(r"\n-{2,}\s*Original Message", re.I),   # Outlook
+    re.compile(r"\nFrom:\s.*@"),                       # forwarded-header style
+)
+
+
+def _trim_quoted(text: str) -> str:
+    if re.match(r"\s*>", text):  # body is pure quote from the first character
+        return ""
+    cut = len(text)
+    for pat in _QUOTE_MARKERS:
+        m = pat.search(text)
+        if m:
+            cut = min(cut, m.start())
+    return text[:cut].strip()
+
+
 def extract_reply(item: dict) -> dict | None:
     """Normalize one Instantly email object to ``{id, lead_email, reply_text, ts, subject}``.
 
@@ -89,7 +110,9 @@ def extract_reply(item: dict) -> dict | None:
         text = body.get("text") or _strip_html(body.get("html") or "")
     else:
         text = str(body)
-    text = (text or item.get("content_preview") or "").strip()
+    text = _trim_quoted((text or "").strip())
+    if not text:  # trimming ate everything -> fall back to Instantly's preview
+        text = str(item.get("content_preview") or "").strip()
 
     return {
         "id": str(item.get("id") or ""),
@@ -107,8 +130,9 @@ def fetch_replies(*, api_key: str, campaign_id: str, http_request=_http_request,
     raw_items: list[dict] = []
     starting_after = None
     for _ in range(max_pages):
-        params = {"campaign_id": campaign_id, "email_type": "received",
-                  "limit": page_size}
+        # No server-side type filter (param names vary) — ue_type==2 filters
+        # client-side in extract_reply, verified against the live schema.
+        params = {"campaign_id": campaign_id, "limit": page_size}
         if starting_after:
             params["starting_after"] = starting_after
         url = f"{EMAILS_URL}?{urllib.parse.urlencode(params)}"

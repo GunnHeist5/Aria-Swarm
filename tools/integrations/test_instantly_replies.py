@@ -48,6 +48,32 @@ def test_extract_html_fallback_and_name_addr():
     assert r["reply_text"] == "Sure, call me & we talk"
 
 
+def test_quoted_thread_is_trimmed():
+    # Shaped like the real reply seen live: seller's words, then the quoted
+    # outreach (which contains our own pitch + the STOP line). Only the
+    # seller's part may reach the qualifier.
+    text = (
+        "Hello\nAsking for a firm 400k\nThanks\nMona Dhall\n\n"
+        "Sent from a handheld device. Please excuse any typing errors. \n\n"
+        "> On Jul 7, 2026, at 4:14 PM, Justin Young <invest@x.org> wrote:\n"
+        "> \n> Hi Monika,\n> I'm Jessica Young with ARIA Capital...\n"
+        "> Not interested? Just reply \"STOP\" and I won't reach out again\n"
+    )
+    r = R.extract_reply(_item(text=text))
+    assert "400k" in r["reply_text"]
+    assert "STOP" not in r["reply_text"] and "Jessica" not in r["reply_text"]
+
+
+def test_trim_variants():
+    assert R._trim_quoted("Yes 50k works\nOn Mon, Jul 7, Jane <j@x.com> wrote:\n> hi") == "Yes 50k works"
+    assert R._trim_quoted("call me\n-- Original Message --\nold stuff") == "call me"
+    assert R._trim_quoted("no markers at all") == "no markers at all"
+    # trimming everything falls back to content_preview in extract_reply
+    item = _item(text="> fully quoted, nothing new")
+    item["content_preview"] = "fallback preview"
+    assert R.extract_reply(item)["reply_text"] == "fallback preview"
+
+
 def test_fetch_paginates_and_sorts_oldest_first():
     stub = _http([
         {"items": [_item("e2", ts="2026-07-08T02:00:00")], "next_starting_after": "e2"},
@@ -55,7 +81,7 @@ def test_fetch_paginates_and_sorts_oldest_first():
     ])
     replies = R.fetch_replies(api_key="k", campaign_id="c", http_request=stub)
     assert [r["id"] for r in replies] == ["e1", "e2"]
-    assert len(stub.calls) == 2 and "email_type=received" in stub.calls[0]
+    assert len(stub.calls) == 2 and "campaign_id=c" in stub.calls[0]
 
 
 def test_fetch_auth_fail_closed():
