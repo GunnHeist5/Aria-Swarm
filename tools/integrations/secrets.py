@@ -57,6 +57,8 @@ REQUIRED: dict[str, list[str]] = {
     "composio": ["COMPOSIO_API_KEY"],
     "telegram": ["MUFFIN_TELEGRAM_TOKEN", "JUSTIN_TELEGRAM_CHAT_ID"],
     "dealflow": ["DEALFLOW_SECRET", "TELEGRAM_WEBHOOK_SECRET", "PANDADOC_WEBHOOK_SECRET"],
+    # Dirt Screener comps search (tools/screener); SEARCH_API_KEY also accepted.
+    "brave_search": ["BRAVE_API_KEY"],
 }
 
 # Sensible non-secret defaults (overridable via env). These are NOT secrets.

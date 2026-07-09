@@ -6,6 +6,10 @@ __pycache__/
 venv/
 env/
 
+# Dirt Screener output (scored workbooks contain lead PII — never commit)
+out/
+enriched_leads.xlsx
+
 # Local state / secrets (the swarm wallet lives in ~/.automaton, but guard against strays)
 *.sqlite
 *.sqlite3

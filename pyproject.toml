@@ -27,6 +27,13 @@ dependencies = [
 
     # Loads a local .env into the environment at CLI startup (secret injection).
     "python-dotenv==1.2.2",
+
+    # Dirt Screener (tools/screener) — parcel geometry math, styled XLSX
+    # output, and the config.yaml overlay. The only non-stdlib I/O deps in
+    # the tree; keep it that way.
+    "shapely==2.1.1",
+    "openpyxl==3.1.5",
+    "pyyaml==6.0.2",
 ]
 
 [build-system]

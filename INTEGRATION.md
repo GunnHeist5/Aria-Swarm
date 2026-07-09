@@ -252,6 +252,30 @@ Env: `PANDADOC_ASSIGNMENT_TEMPLATE_ID` (required, no default), role overrides
 `PANDADOC_ASSIGNMENT_BUYER_ROLE` / `PANDADOC_ASSIGNMENT_ASSIGNOR_ROLE`.
 Validate with `python -m tools.dealflow.contracts --check-assignment`.
 
+## Dirt Screener — lead enrichment BEFORE outreach (`screen.py`)
+
+Standalone CLI (`tools/screener/`) that turns a raw PropStream export into a
+call list: parcel geometry from HCAD kills slivers (aspect ratio > 4 or width
+< 50 ft), OSM road data kills landlocked strips, FEMA flags floodplain as a
+negotiation lever, then Brave-search comps + LLM extraction price the
+survivors into a verdict (`SEND CONTRACT` / `NEGOTIATE` / `RENEGOTIATE` /
+`ASSEMBLAGE_LEAD` / `PASS`) with a max allowable offer. Cheap deterministic
+kills run before any token spend; fetch failures fail closed to a
+`needs_manual` sheet, never to a kill verdict.
+
+```bash
+python screen.py --check                      # live endpoint probes, run first
+python screen.py leads.csv --limit 10         # sample run
+python screen.py leads.csv --maps             # full run + SVG parcel sketches
+```
+
+Outputs `out/enriched_leads.xlsx` (color-coded) + `out/summary.md`. Tunables
+live in `tools/screener/config.py` (overlay with `--config config.yaml`);
+env: `BRAVE_API_KEY` (or `SEARCH_API_KEY`) + `ANTHROPIC_API_KEY` for comps —
+without them the deterministic stages still run. Results cache per
+(account, stage, config-hash) in `~/.automaton/screener_cache.db`, so
+interrupted runs resume and re-runs are free.
+
 ## Exit codes
 
 `0` done · `1` cycle error (state preserved) · `2` frozen awaiting HITL
