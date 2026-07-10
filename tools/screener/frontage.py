@@ -117,6 +117,64 @@ def fetch_roads(
     return roads
 
 
+def fetch_roads_arcgis(
+    bbox_wgs84: tuple[float, float, float, float],
+    config: ScreenerConfig = DEFAULT_CONFIG,
+    *,
+    http_request=None,
+    sleep=time.sleep,
+    cache=None,
+) -> list[dict] | None:
+    """Road centerlines from the TxDOT roadway inventory (ArcGIS polylines).
+
+    Same contract as fetch_roads: None = couldn't check, [] = verified none.
+    """
+
+    from .arcgis import _request, query_layer
+
+    w, s, e, n = bbox_wgs84
+    lat0 = (s + n) / 2
+    ft_lon, ft_lat = feet_per_degree(lat0)
+    pad_lon, pad_lat = _BBOX_PAD_FT / ft_lon, _BBOX_PAD_FT / ft_lat
+    envelope = json.dumps({
+        "xmin": round(w - pad_lon, 5), "ymin": round(s - pad_lat, 5),
+        "xmax": round(e + pad_lon, 5), "ymax": round(n + pad_lat, 5),
+        "spatialReference": {"wkid": 4326},
+    })
+    data = query_layer(
+        config.roads_arcgis_url,
+        {
+            "geometry": envelope,
+            "geometryType": "esriGeometryEnvelope",
+            "inSR": "4326",
+            "spatialRel": "esriSpatialRelIntersects",
+            "outFields": "*",
+            "returnGeometry": "true",
+            "outSR": "4326",
+        },
+        http_request=http_request or _request,
+        sleep=sleep,
+        retry_delays=config.retry_delays_s,
+        cache=cache,
+        cache_key="roadsgis:" + envelope,
+    )
+    if "error" in data:
+        return None
+    roads = []
+    for feat in data.get("features") or []:
+        attrs = feat.get("attributes") or {}
+        name = next(
+            (str(attrs[f]).strip() for f in config.roads_name_fields
+             if attrs.get(f) and str(attrs[f]).strip()),
+            "(unnamed road)",
+        )
+        for path in (feat.get("geometry") or {}).get("paths") or []:
+            coords = [tuple(pt[:2]) for pt in path]
+            if len(coords) >= 2:
+                roads.append({"name": name, "coords": coords})
+    return roads
+
+
 def compute_frontage(
     rings_wgs84: list[list[tuple[float, float]]],
     roads: list[dict],

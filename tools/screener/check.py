@@ -84,22 +84,28 @@ def run_check(config: ScreenerConfig = DEFAULT_CONFIG) -> int:
                  "source": zone.get("source")}
     report["probes"]["fema_point_lookup"] = probe
 
-    # -- Overpass roads ------------------------------------------------------
+    # -- Roads ---------------------------------------------------------------
     # Probe a road-dense residential bbox, NOT the sliver parcel's own bbox —
     # a sliver with no nearby road is the landlocked case, not a probe failure.
+    # TxDOT (Esri infra) is the primary source; Overpass is the fallback and
+    # its failure is only a warning while TxDOT answers.
     d = 0.002
     bbox = (FLOOD_POINT[1] - d, FLOOD_POINT[0] - d,
             FLOOD_POINT[1] + d, FLOOD_POINT[0] + d)
-    roads = frontage.fetch_roads(bbox, config)
-    if roads is None:
-        probe = {"ok": False, "detail": "fetch failed on both Overpass hosts"}
-    else:
-        probe = {
-            "ok": bool(roads),
-            "roads": sorted({r["name"] for r in roads})[:8],
-        }
-    ok = ok and bool(probe["ok"])
-    report["probes"]["overpass_roads"] = probe
+    txdot = frontage.fetch_roads_arcgis(bbox, config)
+    report["probes"]["txdot_roads"] = (
+        {"ok": False, "detail": "fetch failed"}
+        if txdot is None
+        else {"ok": bool(txdot), "roads": sorted({r["name"] for r in txdot})[:8]}
+    )
+    overpass = frontage.fetch_roads(bbox, config)
+    report["probes"]["overpass_fallback"] = (
+        {"ok": None, "detail": "unreachable (fallback only)"}
+        if overpass is None
+        else {"ok": bool(overpass), "roads_found": len(overpass)}
+    )
+    # The pipeline needs at least ONE working road source.
+    ok = ok and (bool(txdot) or bool(overpass))
 
     # -- Brave key ------------------------------------------------------------
     try:

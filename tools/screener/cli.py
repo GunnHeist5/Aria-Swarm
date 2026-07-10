@@ -108,11 +108,18 @@ def _geometry_stage(row: dict, config: ScreenerConfig, county, *,
     }
 
 
-def _frontage_stage(row: dict, config: ScreenerConfig, *, http_request=None,
-                    sleep, cache) -> dict:
-    roads = frontage.fetch_roads(
-        row["_bbox"], config, sleep=sleep, cache=cache, **_seam(http_request))
-    if roads is None:  # fetch failure must never look landlocked
+def _frontage_stage(row: dict, config: ScreenerConfig, *, arcgis_request=None,
+                    overpass_request=None, sleep, cache) -> dict:
+    roads = None
+    if config.roads_arcgis_url:  # primary: TxDOT inventory (Esri infra)
+        roads = frontage.fetch_roads_arcgis(
+            row["_bbox"], config, http_request=arcgis_request,
+            sleep=sleep, cache=cache)
+    if roads is None:  # fallback: OpenStreetMap via Overpass
+        roads = frontage.fetch_roads(
+            row["_bbox"], config, sleep=sleep, cache=cache,
+            **_seam(overpass_request))
+    if roads is None:  # both failed — must never look landlocked
         return {"needs_manual_reason": "road data unavailable"}
     result = frontage.compute_frontage(row["_rings"], roads, config)
     result["_roads"] = roads
@@ -187,7 +194,8 @@ def run_pipeline(
                 row["needs_manual_reason"] = "road data unavailable"
             else:
                 payload = cached_stage(row, "frontage", lambda: _frontage_stage(
-                    row, config, http_request=overpass_request, sleep=sleep,
+                    row, config, arcgis_request=http_request,
+                    overpass_request=overpass_request, sleep=sleep,
                     cache=cache))
                 row.update(payload)
                 if payload.get("needs_manual_reason") == "road data unavailable":

@@ -64,8 +64,20 @@ class ScreenerConfig:
         "https://services.arcgis.com/P3ePLMYs2RVChkJx/arcgis/rest/services/"
         "USA_Flood_Hazard_Reduced_Set_gdb/FeatureServer/0"
     )
-    # Overpass mirrors in preference order — the ecosystem rate-limits
-    # pipelines aggressively, so spread across mirrors and stay polite.
+    # Primary road source: TxDOT's statewide roadway inventory (includes
+    # off-system local streets) on Esri infrastructure — the same host class
+    # as the parcel/flood layers, no OSM rate-limit roulette.
+    roads_arcgis_url: str = (
+        "https://services.arcgis.com/KTcxiTD9dsQw4r7Z/arcgis/rest/services/"
+        "TxDOT_Roadways/FeatureServer/0"
+    )
+    # Candidate attribute names for the street name, first non-empty wins
+    # (schema drift = config edit, and the name is informational anyway).
+    roads_name_fields: tuple = (
+        "ST_NM", "STREET_NAME", "ST_NAME", "FULL_NAME", "ROAD_NAME", "RTE_NM",
+    )
+    # Fallback road source — Overpass mirrors in preference order; the
+    # ecosystem rate-limits pipelines aggressively, so spread and stay polite.
     overpass_urls: tuple = (
         "https://overpass.kumi.systems/api/interpreter",
         "https://lz4.overpass-api.de/api/interpreter",

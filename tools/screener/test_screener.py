@@ -78,6 +78,14 @@ FEMA_X = {"features": [{"attributes": {"FLD_ZONE": "X", "ZONE_SUBTY": "",
 
 # a road 2 ft north of the normal lot's top edge (inside the 5 ft buffer)
 _road_ft = [(-50.0, 62.0), (170.0, 62.0)]
+TXDOT_ROADS = {
+    "features": [{
+        "attributes": {"ST_NM": "Richland Dr", "RTE_NM": ""},
+        "geometry": {"paths": [
+            [list(pt) for pt in from_local_feet([_road_ft], LON0, LAT0)[0]]
+        ]},
+    }]
+}
 OVERPASS_ROAD = {
     "elements": [{
         "type": "way",
@@ -271,6 +279,31 @@ def test_fetch_roads_backoff_then_fallback_and_failure_is_none():
     dead = fetch_roads(bbox, http_request=lambda *a: (429, ""),
                        sleep=lambda s: None)
     assert dead is None                              # never an empty-list kill
+
+
+def test_fetch_roads_arcgis_parses_paths_and_names():
+    from .frontage import fetch_roads_arcgis
+
+    urls = []
+
+    def stub(method, url, payload, key):
+        urls.append(url)
+        return 200, json.dumps(TXDOT_ROADS)
+
+    bbox = (LON0 - 0.001, LAT0 - 0.001, LON0 + 0.001, LAT0 + 0.001)
+    roads = fetch_roads_arcgis(bbox, http_request=stub, sleep=lambda s: None)
+    assert roads and roads[0]["name"] == "Richland Dr"
+    assert len(roads[0]["coords"]) == 2
+    assert "TxDOT_Roadways" in urls[0]
+
+    dead = fetch_roads_arcgis(bbox, http_request=lambda *a: (503, "down"),
+                              sleep=lambda s: None)
+    assert dead is None                              # failure, not "no roads"
+
+    empty = fetch_roads_arcgis(bbox,
+                               http_request=lambda *a: (200, '{"features":[]}'),
+                               sleep=lambda s: None)
+    assert empty == []                               # verified no roads
 
 
 def test_overpass_remark_timeout_is_failure_not_no_roads():
@@ -639,6 +672,7 @@ def test_run_pipeline_end_to_end(tmp_path):
     # outFields, so match its unique geometryType first
     stub, calls = _arcgis_stub({
         "esriGeometryPolygon": HCAD_ADJ,
+        "TxDOT_Roadways": TXDOT_ROADS,
         "NFHL": FEMA_X,
         "HCAD_NUM": HCAD_FEATURE,
     })
@@ -682,7 +716,8 @@ def test_road_failures_retry_on_rerun_and_trip_breaker(tmp_path):
         "NFHL": FEMA_X,
         "HCAD_NUM": HCAD_FEATURE,
     })
-    cfg = DEFAULT_CONFIG.mutate(retry_delays_s=(0.1,))
+    # disable the TxDOT primary so this exercises the Overpass fallback path
+    cfg = DEFAULT_CONFIG.mutate(retry_delays_s=(0.1,), roads_arcgis_url="")
     cache = Cache(tmp_path / "roads.db")
 
     def fresh_rows():
