@@ -42,22 +42,29 @@ def flood_zone(
     unmapped is not a floodplain claim, and flood is a soft kill anyway.
     """
 
-    data = query_layer(
-        config.fema_nfhl_url,
-        {
-            "geometry": f"{lon},{lat}",
-            "geometryType": "esriGeometryPoint",
-            "inSR": "4326",
-            "spatialRel": "esriSpatialRelIntersects",
-            "outFields": "FLD_ZONE,ZONE_SUBTY,SFHA_TF",
-            "returnGeometry": "false",
-        },
-        http_request=http_request,
-        sleep=sleep,
-        retry_delays=config.retry_delays_s,
-        cache=cache,
-        cache_key=f"fema:{lat:.5f},{lon:.5f}",
-    )
+    params = {
+        "geometry": f"{lon},{lat}",
+        "geometryType": "esriGeometryPoint",
+        "inSR": "4326",
+        "spatialRel": "esriSpatialRelIntersects",
+        "outFields": "FLD_ZONE,ZONE_SUBTY,SFHA_TF",
+        "returnGeometry": "false",
+    }
+    data: dict = {"error": "no FEMA host configured"}
+    for host in (config.fema_nfhl_url, config.fema_nfhl_fallback_url):
+        if not host:
+            continue
+        data = query_layer(
+            host,
+            params,
+            http_request=http_request,
+            sleep=sleep,
+            retry_delays=config.retry_delays_s,
+            cache=cache,
+            cache_key=f"fema:{lat:.5f},{lon:.5f}",
+        )
+        if "error" not in data:
+            break
     if "error" in data:
         return {"error": data["error"]}
     features = data.get("features") or []

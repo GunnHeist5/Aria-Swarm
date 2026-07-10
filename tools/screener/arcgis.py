@@ -39,13 +39,46 @@ def _request(method: str, url: str, payload: dict | None, key: str) -> tuple[int
         },
         method=method,
     )
+    return open_with_tls_fallback(req, timeout=30)
+
+
+def open_with_tls_fallback(req: urllib.request.Request, *, timeout: float) -> tuple[int, str]:
+    """urlopen, retrying SSL failures with a TLS 1.2-pinned context.
+
+    Some federal WAFs (FEMA's included) drop Python's default TLS 1.3
+    handshake mid-stream ("UNEXPECTED_EOF_WHILE_READING") while accepting a
+    plain TLS 1.2 one — observed live on hazards.fema.gov from the VPS.
+    """
+
+    import ssl
+
+    contexts: tuple = (None,)
     try:
-        with urllib.request.urlopen(req, timeout=30) as r:
-            return r.status, r.read().decode("utf-8", "replace")
-    except urllib.error.HTTPError as exc:
-        return exc.code, exc.read().decode("utf-8", "replace")
-    except (urllib.error.URLError, TimeoutError, OSError) as exc:
-        return 0, f"network error: {exc}"
+        legacy = ssl.create_default_context()
+        legacy.maximum_version = ssl.TLSVersion.TLSv1_2
+        contexts = (None, legacy)
+    except (AttributeError, ssl.SSLError):
+        pass
+
+    last: tuple[int, str] = (0, "network error: no attempt made")
+    for ctx in contexts:
+        try:
+            kwargs = {"timeout": timeout}
+            if ctx is not None:
+                kwargs["context"] = ctx
+            with urllib.request.urlopen(req, **kwargs) as r:
+                return r.status, r.read().decode("utf-8", "replace")
+        except urllib.error.HTTPError as exc:
+            return exc.code, exc.read().decode("utf-8", "replace")
+        except urllib.error.URLError as exc:
+            last = (0, f"network error: {exc}")
+            if not isinstance(exc.reason, ssl.SSLError):
+                return last  # not TLS — a downgraded retry won't help
+        except (ssl.SSLError,) as exc:
+            last = (0, f"network error: {exc}")
+        except (TimeoutError, OSError) as exc:
+            return 0, f"network error: {exc}"
+    return last
 
 
 def query_layer(

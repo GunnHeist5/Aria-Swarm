@@ -17,12 +17,11 @@ from __future__ import annotations
 
 import json
 import time
-import urllib.error
 import urllib.request
 
 from shapely.geometry import LineString
 
-from .arcgis import USER_AGENT
+from .arcgis import USER_AGENT, open_with_tls_fallback
 from .config import DEFAULT_CONFIG, ScreenerConfig
 from .geometry import _polygon_from_rings, feet_per_degree, to_local_feet
 
@@ -40,13 +39,7 @@ def _overpass_request(method: str, url: str, payload: dict | None, key: str) -> 
         headers={"User-Agent": USER_AGENT, "Content-Type": "text/plain"},
         method="POST",
     )
-    try:
-        with urllib.request.urlopen(req, timeout=60) as r:
-            return r.status, r.read().decode("utf-8", "replace")
-    except urllib.error.HTTPError as exc:
-        return exc.code, exc.read().decode("utf-8", "replace")
-    except (urllib.error.URLError, TimeoutError, OSError) as exc:
-        return 0, f"network error: {exc}"
+    return open_with_tls_fallback(req, timeout=60)
 
 
 def fetch_roads(

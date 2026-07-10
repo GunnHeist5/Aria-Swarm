@@ -53,6 +53,9 @@ class ScreenerConfig:
     fema_nfhl_url: str = (
         "https://hazards.fema.gov/arcgis/rest/services/public/NFHL/MapServer/28"
     )
+    fema_nfhl_fallback_url: str = (
+        "https://hazards.fema.gov/gis/nfhl/rest/services/public/NFHL/MapServer/28"
+    )
     overpass_url: str = "https://overpass.kumi.systems/api/interpreter"
     overpass_fallback_url: str = "https://overpass-api.de/api/interpreter"
     brave_url: str = "https://api.search.brave.com/res/v1/web/search"

@@ -24,7 +24,7 @@ from . import fema, frontage, harris
 from .config import DEFAULT_CONFIG, ScreenerConfig
 from .geometry import parcel_metrics, shape_flag
 
-SLIVER_ACCOUNT = "0440240000280"           # brief acceptance: 33x660 strip
+SLIVER_ACCOUNT = "0440240000280"  # Richland Dr strip (live: ~48x217, AR 4.5)
 FLOOD_POINT = (29.8280, -95.2861)          # Hunting Bayou area, 77028
 DRY_POINT = (30.0906, -95.6592)            # Tomball
 
@@ -76,19 +76,20 @@ def run_check(config: ScreenerConfig = DEFAULT_CONFIG) -> int:
         report["probes"][name] = probe
 
     # -- Overpass roads ------------------------------------------------------
-    if not parcel.get("error") and not parcel.get("missing"):
-        metrics = parcel_metrics(parcel["rings"]) or {}
-        bbox = metrics.get("bbox_wgs84")
-    else:
-        d = 0.002
-        bbox = (FLOOD_POINT[1] - d, FLOOD_POINT[0] - d,
-                FLOOD_POINT[1] + d, FLOOD_POINT[0] + d)
+    # Probe a road-dense residential bbox, NOT the sliver parcel's own bbox —
+    # a sliver with no nearby road is the landlocked case, not a probe failure.
+    d = 0.002
+    bbox = (FLOOD_POINT[1] - d, FLOOD_POINT[0] - d,
+            FLOOD_POINT[1] + d, FLOOD_POINT[0] + d)
     roads = frontage.fetch_roads(bbox, config)
-    probe = {
-        "ok": bool(roads),
-        "roads": sorted({r["name"] for r in roads or []})[:8],
-    }
-    ok = ok and probe["ok"]
+    if roads is None:
+        probe = {"ok": False, "detail": "fetch failed on both Overpass hosts"}
+    else:
+        probe = {
+            "ok": bool(roads),
+            "roads": sorted({r["name"] for r in roads})[:8],
+        }
+    ok = ok and bool(probe["ok"])
     report["probes"]["overpass_roads"] = probe
 
     # -- Brave key ------------------------------------------------------------

@@ -294,6 +294,20 @@ def test_flood_zone_query():
                         http_request=lambda *a: (200, json.dumps(FEMA_AE)),
                         sleep=lambda s: None)
     assert result == {"flood_zone": "AE", "flood_flag": "FLOODPLAIN"}
+
+
+def test_flood_zone_uses_fallback_host():
+    urls = []
+
+    def stub(method, url, payload, key):
+        urls.append(url)
+        if "/gis/nfhl/" in url:  # the fallback path
+            return 200, json.dumps(FEMA_AE)
+        return 0, "network error: SSL EOF"
+
+    result = flood_zone(29.828, -95.286, http_request=stub, sleep=lambda s: None)
+    assert result["flood_flag"] == "FLOODPLAIN"
+    assert any("/gis/nfhl/" in u for u in urls)
     empty = flood_zone(30.0, -95.0,
                        http_request=lambda *a: (200, '{"features": []}'),
                        sleep=lambda s: None)
