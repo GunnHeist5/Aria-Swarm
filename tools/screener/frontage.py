@@ -76,27 +76,34 @@ def fetch_roads(
         f'({bbox[0]},{bbox[1]},{bbox[2]},{bbox[3]});'
         f'out tags geom;'
     )
-    hosts = (config.overpass_url, config.overpass_fallback_url)
-    body = None
-    for host in hosts:
+    data = None
+    for host in config.overpass_urls:
+        sleep(config.overpass_spacing_s)
         for attempt, delay in enumerate((0.0,) + tuple(config.retry_delays_s)):
             if delay:
                 sleep(delay)
             status, resp = http_request("POST", host, {"data": query}, "")
             if status == 200:
-                body = resp
+                try:
+                    parsed = json.loads(resp)
+                except ValueError:
+                    break  # garbage from this host — try the next
+                # Overpass reports overload as HTTP 200 + a "remark" (e.g.
+                # "runtime error: Query timed out") — that is NOT "verified
+                # no roads"; treating it as such would false-kill the lead.
+                remark = str(parsed.get("remark") or "")
+                if "error" in remark.lower() or "timed out" in remark.lower():
+                    break
+                data = parsed
                 break
             if status not in (429, 504, 0):
                 break  # non-transient — try the next host
-        if body is not None:
+        if data is not None:
             break
-    if body is None:
+    if data is None:
         return None
 
-    try:
-        elements = json.loads(body).get("elements") or []
-    except ValueError:
-        return None
+    elements = data.get("elements") or []
     roads = [
         {
             "name": (el.get("tags") or {}).get("name") or "(unnamed road)",

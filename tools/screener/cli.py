@@ -150,6 +150,7 @@ def run_pipeline(
     cfg_hash = config_hash(config)
     comps_enabled = brave is not None and llm is not None
     comps_dead = False
+    road_failures = 0  # consecutive; 3 trips the breaker for this run
 
     def cached_stage(row, stage, fn) -> dict:
         account = row["hcad_account"]
@@ -158,7 +159,8 @@ def run_pipeline(
             if hit is not None:
                 return hit
         payload = fn()
-        if cache is not None:
+        # Failures are never cached — a rerun must retry them, not resume them.
+        if cache is not None and not payload.get("needs_manual_reason"):
             cache.put_stage(account, stage, cfg_hash, _json_safe(payload))
         return payload
 
@@ -178,9 +180,20 @@ def run_pipeline(
             stage_reached = "geometry"
 
         if not row["needs_manual_reason"] and row.get("_rings"):
-            row.update(cached_stage(row, "frontage", lambda: _frontage_stage(
-                row, config, http_request=overpass_request, sleep=sleep,
-                cache=cache)))
+            if road_failures >= 3:
+                # Overpass is down for this run — fail fast instead of
+                # burning the whole retry ladder on every remaining lead.
+                # Not cached, so the next run retries all of them.
+                row["needs_manual_reason"] = "road data unavailable"
+            else:
+                payload = cached_stage(row, "frontage", lambda: _frontage_stage(
+                    row, config, http_request=overpass_request, sleep=sleep,
+                    cache=cache))
+                row.update(payload)
+                if payload.get("needs_manual_reason") == "road data unavailable":
+                    road_failures += 1
+                else:
+                    road_failures = 0
             stage_reached = "frontage"
 
         if not row["needs_manual_reason"] and row.get("_centroid"):

@@ -273,6 +273,19 @@ def test_fetch_roads_backoff_then_fallback_and_failure_is_none():
     assert dead is None                              # never an empty-list kill
 
 
+def test_overpass_remark_timeout_is_failure_not_no_roads():
+    # HTTP 200 + "remark" is Overpass saying it gave up — NOT "no roads here";
+    # reading it as empty would false-kill the lead as landlocked.
+    overloaded = json.dumps({
+        "remark": "runtime error: Query timed out in \"query\" at line 1",
+        "elements": [],
+    })
+    bbox = (LON0 - 0.001, LAT0 - 0.001, LON0 + 0.001, LAT0 + 0.001)
+    roads = fetch_roads(bbox, http_request=lambda *a: (200, overloaded),
+                        sleep=lambda s: None)
+    assert roads is None
+
+
 # ---------------------------------------------------------------------------
 # fema
 # ---------------------------------------------------------------------------
@@ -659,6 +672,44 @@ def test_run_pipeline_end_to_end(tmp_path):
                  overpass_request=overpass_stub, sleep=lambda s: None,
                  cache=cache, log=lambda m: None)
     assert len(calls) == before                       # zero new HTTP calls
+
+
+def test_road_failures_retry_on_rerun_and_trip_breaker(tmp_path):
+    from .cli import run_pipeline
+
+    stub, _ = _arcgis_stub({
+        "esriGeometryPolygon": HCAD_ADJ,
+        "NFHL": FEMA_X,
+        "HCAD_NUM": HCAD_FEATURE,
+    })
+    cfg = DEFAULT_CONFIG.mutate(retry_delays_s=(0.1,))
+    cache = Cache(tmp_path / "roads.db")
+
+    def fresh_rows():
+        return [{"Address": f"{i} Richland Dr", "Zip": "77028",
+                 "APN": "044-024-000-0280", "Lot Size Sqft": "21780"}
+                for i in range(4)]
+
+    down_calls = []
+
+    def overpass_down(method, url, payload, key):
+        down_calls.append(1)
+        return 429, "overloaded"
+
+    rows = fresh_rows()
+    run_pipeline(rows, cfg, http_request=stub, overpass_request=overpass_down,
+                 sleep=lambda s: None, cache=cache, log=lambda m: None)
+    assert all(r["needs_manual_reason"] == "road data unavailable" for r in rows)
+    # breaker: leads 1-3 each try 3 hosts x 2 attempts; lead 4 tries none
+    assert len(down_calls) == 3 * 3 * 2
+
+    # rerun with Overpass healthy: failures were NOT cached, so they retry
+    rows2 = fresh_rows()
+    run_pipeline(rows2, cfg, http_request=stub,
+                 overpass_request=lambda *a: (200, json.dumps(OVERPASS_ROAD)),
+                 sleep=lambda s: None, cache=cache, log=lambda m: None)
+    assert all(not r["needs_manual_reason"] for r in rows2)
+    assert all(r["verdict"] == "ASSEMBLAGE_LEAD" for r in rows2)  # sliver+builder
 
 
 if __name__ == "__main__":

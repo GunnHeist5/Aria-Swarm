@@ -64,8 +64,14 @@ class ScreenerConfig:
         "https://services.arcgis.com/P3ePLMYs2RVChkJx/arcgis/rest/services/"
         "USA_Flood_Hazard_Reduced_Set_gdb/FeatureServer/0"
     )
-    overpass_url: str = "https://overpass.kumi.systems/api/interpreter"
-    overpass_fallback_url: str = "https://overpass-api.de/api/interpreter"
+    # Overpass mirrors in preference order — the ecosystem rate-limits
+    # pipelines aggressively, so spread across mirrors and stay polite.
+    overpass_urls: tuple = (
+        "https://overpass.kumi.systems/api/interpreter",
+        "https://lz4.overpass-api.de/api/interpreter",
+        "https://overpass-api.de/api/interpreter",
+    )
+    overpass_spacing_s: float = 1.0    # courtesy gap before each live fetch
     brave_url: str = "https://api.search.brave.com/res/v1/web/search"
 
     # -- input mapping --
