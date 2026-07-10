@@ -52,6 +52,29 @@ def flood_zone(
         "outFields": "*",
         "returnGeometry": "false",
     }
+    data, source = _query_nfhl(
+        params, config, http_request=http_request, sleep=sleep, cache=cache,
+        cache_key=f"fema:{lat:.5f},{lon:.5f}")
+    if "error" in data:
+        return {"error": data["error"]}
+    features = data.get("features") or []
+    if not features:
+        return {"flood_zone": "UNKNOWN", "flood_flag": None, "source": source}
+    attrs = features[0].get("attributes") or {}
+    zone = (attrs.get("FLD_ZONE") or "UNKNOWN").strip()
+    subtype = (attrs.get("ZONE_SUBTY") or "").strip()
+    label = f"{zone} ({subtype})" if subtype else zone
+    return {
+        "flood_zone": label,
+        "flood_flag": classify_zone(zone, attrs.get("SFHA_TF")),
+        "source": source,
+    }
+
+
+def _query_nfhl(params: dict, config: ScreenerConfig, *, http_request, sleep,
+                cache=None, cache_key=None) -> tuple[dict, str | None]:
+    """Try each configured NFHL host in order; (response, answering host)."""
+
     data: dict = {"error": "no FEMA host configured"}
     for host in (config.fema_nfhl_url, config.fema_nfhl_fallback_url,
                  config.fema_agol_fallback_url):
@@ -64,20 +87,41 @@ def flood_zone(
             sleep=sleep,
             retry_delays=config.retry_delays_s,
             cache=cache,
-            cache_key=f"fema:{lat:.5f},{lon:.5f}",
+            cache_key=cache_key,
         )
         if "error" not in data:
-            break
+            return data, host
+    return data, None
+
+
+def sfha_count_in_envelope(
+    bbox_wgs84: tuple[float, float, float, float],
+    config: ScreenerConfig = DEFAULT_CONFIG,
+    *,
+    http_request=_request,
+    sleep=time.sleep,
+) -> dict:
+    """How many A/V-zone polygons intersect (w, s, e, n)? For the self-check.
+
+    A data-presence probe: it validates the reachable host actually carries
+    Special Flood Hazard Area polygons for the area, without betting the
+    check on one hand-guessed coordinate being inside a flood line.
+    """
+
+    w, s, e, n = bbox_wgs84
+    import json as _json
+
+    params = {
+        "geometry": _json.dumps({"xmin": w, "ymin": s, "xmax": e, "ymax": n,
+                                 "spatialReference": {"wkid": 4326}}),
+        "geometryType": "esriGeometryEnvelope",
+        "inSR": "4326",
+        "spatialRel": "esriSpatialRelIntersects",
+        "where": "FLD_ZONE LIKE 'A%' OR FLD_ZONE LIKE 'V%'",
+        "returnCountOnly": "true",
+    }
+    data, source = _query_nfhl(params, config, http_request=http_request,
+                               sleep=sleep)
     if "error" in data:
         return {"error": data["error"]}
-    features = data.get("features") or []
-    if not features:
-        return {"flood_zone": "UNKNOWN", "flood_flag": None}
-    attrs = features[0].get("attributes") or {}
-    zone = (attrs.get("FLD_ZONE") or "UNKNOWN").strip()
-    subtype = (attrs.get("ZONE_SUBTY") or "").strip()
-    label = f"{zone} ({subtype})" if subtype else zone
-    return {
-        "flood_zone": label,
-        "flood_flag": classify_zone(zone, attrs.get("SFHA_TF")),
-    }
+    return {"count": int(data.get("count") or 0), "source": source}

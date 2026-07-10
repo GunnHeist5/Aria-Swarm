@@ -293,7 +293,8 @@ def test_flood_zone_query():
     result = flood_zone(29.828, -95.286,
                         http_request=lambda *a: (200, json.dumps(FEMA_AE)),
                         sleep=lambda s: None)
-    assert result == {"flood_zone": "AE", "flood_flag": "FLOODPLAIN"}
+    assert result["flood_zone"] == "AE" and result["flood_flag"] == "FLOODPLAIN"
+    assert "hazards.fema.gov" in result["source"]
 
 
 def test_flood_zone_uses_fallback_host():
@@ -330,7 +331,27 @@ def test_flood_zone_falls_through_to_agol_mirror():
     empty = flood_zone(30.0, -95.0,
                        http_request=lambda *a: (200, '{"features": []}'),
                        sleep=lambda s: None)
-    assert empty == {"flood_zone": "UNKNOWN", "flood_flag": None}
+    assert empty["flood_zone"] == "UNKNOWN" and empty["flood_flag"] is None
+
+
+def test_sfha_count_in_envelope():
+    from .fema import sfha_count_in_envelope
+
+    urls = []
+
+    def stub(method, url, payload, key):
+        urls.append(url)
+        return 200, '{"count": 42}'
+
+    result = sfha_count_in_envelope((-95.31, 29.80, -95.26, 29.85),
+                                    http_request=stub, sleep=lambda s: None)
+    assert result["count"] == 42
+    assert "returnCountOnly" in urls[0] and "esriGeometryEnvelope" in urls[0]
+
+    err = sfha_count_in_envelope((-95.31, 29.80, -95.26, 29.85),
+                                 http_request=lambda *a: (0, "network error: x"),
+                                 sleep=lambda s: None)
+    assert "error" in err
 
 
 # ---------------------------------------------------------------------------
