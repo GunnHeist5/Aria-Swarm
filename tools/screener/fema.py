@@ -47,11 +47,14 @@ def flood_zone(
         "geometryType": "esriGeometryPoint",
         "inSR": "4326",
         "spatialRel": "esriSpatialRelIntersects",
-        "outFields": "FLD_ZONE,ZONE_SUBTY,SFHA_TF",
+        # * not a field list: the AGOL mirror's schema differs slightly from
+        # FEMA's (no SFHA_TF), and naming a missing field errors the query.
+        "outFields": "*",
         "returnGeometry": "false",
     }
     data: dict = {"error": "no FEMA host configured"}
-    for host in (config.fema_nfhl_url, config.fema_nfhl_fallback_url):
+    for host in (config.fema_nfhl_url, config.fema_nfhl_fallback_url,
+                 config.fema_agol_fallback_url):
         if not host:
             continue
         data = query_layer(

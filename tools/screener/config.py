@@ -56,6 +56,14 @@ class ScreenerConfig:
     fema_nfhl_fallback_url: str = (
         "https://hazards.fema.gov/gis/nfhl/rest/services/public/NFHL/MapServer/28"
     )
+    # Esri Living Atlas mirror of the NFHL (S_Fld_Haz_Ar, reduced set) — on
+    # Esri infrastructure, so it works when FEMA's WAF blocks the VPS's IP or
+    # TLS fingerprint outright. Slightly staler than FEMA's live layer;
+    # acceptable for a soft-kill negotiation signal.
+    fema_agol_fallback_url: str = (
+        "https://services.arcgis.com/P3ePLMYs2RVChkJx/arcgis/rest/services/"
+        "USA_Flood_Hazard_Reduced_Set_gdb/FeatureServer/0"
+    )
     overpass_url: str = "https://overpass.kumi.systems/api/interpreter"
     overpass_fallback_url: str = "https://overpass-api.de/api/interpreter"
     brave_url: str = "https://api.search.brave.com/res/v1/web/search"

@@ -308,6 +308,25 @@ def test_flood_zone_uses_fallback_host():
     result = flood_zone(29.828, -95.286, http_request=stub, sleep=lambda s: None)
     assert result["flood_flag"] == "FLOODPLAIN"
     assert any("/gis/nfhl/" in u for u in urls)
+
+
+def test_flood_zone_falls_through_to_agol_mirror():
+    # both FEMA hosts down (WAF blocks the VPS) -> the Esri Living Atlas
+    # mirror answers; its schema has no SFHA_TF, prefix logic still flags
+    agol = {"features": [{"attributes": {"FLD_ZONE": "AE",
+                                         "esri_symbology": "1% Annual Chance"}}]}
+    urls = []
+
+    def stub(method, url, payload, key):
+        urls.append(url)
+        if "services.arcgis.com" in url:
+            return 200, json.dumps(agol)
+        return 0, "network error: SSL EOF"
+
+    result = flood_zone(29.828, -95.286, http_request=stub, sleep=lambda s: None)
+    assert result["flood_flag"] == "FLOODPLAIN"
+    assert result["flood_zone"] == "AE"
+    assert any("services.arcgis.com" in u for u in urls)
     empty = flood_zone(30.0, -95.0,
                        http_request=lambda *a: (200, '{"features": []}'),
                        sleep=lambda s: None)
