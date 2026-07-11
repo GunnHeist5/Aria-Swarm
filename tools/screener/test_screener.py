@@ -815,8 +815,9 @@ def test_road_failures_retry_on_rerun_and_trip_breaker(tmp_path):
         "NFHL": FEMA_X,
         "HCAD_NUM": HCAD_FEATURE,
     })
-    # disable the TxDOT primary so this exercises the Overpass fallback path
-    cfg = DEFAULT_CONFIG.mutate(retry_delays_s=(0.1,), roads_arcgis_url="")
+    # disable the ArcGIS road candidates so this exercises the Overpass path
+    cfg = DEFAULT_CONFIG.mutate(retry_delays_s=(0.1,), roads_arcgis_url="",
+                                tiger_roads_url="")
     cache = Cache(tmp_path / "roads.db")
 
     def fresh_rows():
