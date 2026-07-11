@@ -111,29 +111,40 @@ def market_key(rows: list[dict]) -> str | None:
     return None
 
 
-def resolve_campaign(market: str | None) -> str | None:
-    """Instantly campaign for a market: INSTANTLY_CAMPAIGN_ID_<MARKET>.
+def _default_campaign() -> str | None:
+    # get_secret, not os.environ: the default campaign id may live in the
+    # secrets DEFAULTS registry rather than .env (it did on the VPS).
+    try:
+        from tools.integrations.secrets import get_secret
 
-    The default market (LEAD_INTAKE_DEFAULT_MARKET, harris_tx) falls back to
-    the original INSTANTLY_CAMPAIGN_ID so existing setups keep working.
-    None = no campaign configured -> the intake stages the file (desk data
-    only) instead of cross-posting a market into the wrong campaign.
+        return get_secret("INSTANTLY_CAMPAIGN_ID")
+    except Exception:  # noqa: BLE001
+        return os.environ.get("INSTANTLY_CAMPAIGN_ID")
+
+
+def resolve_campaign(market: str | None) -> str | None:
+    """Instantly campaign for a market.
+
+    Precedence:
+      1. INSTANTLY_CAMPAIGN_ID_<MARKET> — explicit per-market override.
+      2. LEAD_INTAKE_SHARED_CAMPAIGN=1 — nationwide mode: EVERY market goes
+         to the default campaign. Requires geography-neutral sequence copy
+         (use the {{propertyCity}}/{{county}}/{{state}} variables).
+      3. The default market (LEAD_INTAKE_DEFAULT_MARKET, harris_tx) falls
+         back to the original INSTANTLY_CAMPAIGN_ID.
+      4. None -> the intake stages the file (desk data only) rather than
+         cross-post a market into a campaign nobody opted it into.
     """
 
     if market:
         specific = os.environ.get(f"INSTANTLY_CAMPAIGN_ID_{market.upper()}")
         if specific:
             return specific
+    if os.environ.get("LEAD_INTAKE_SHARED_CAMPAIGN", "").strip() in ("1", "true", "yes"):
+        return _default_campaign()
     default_market = os.environ.get("LEAD_INTAKE_DEFAULT_MARKET", "harris_tx")
     if market == default_market or market is None:
-        # get_secret, not os.environ: the default campaign id may live in the
-        # secrets DEFAULTS registry rather than .env (it did on the VPS).
-        try:
-            from tools.integrations.secrets import get_secret
-
-            return get_secret("INSTANTLY_CAMPAIGN_ID")
-        except Exception:  # noqa: BLE001
-            return os.environ.get("INSTANTLY_CAMPAIGN_ID")
+        return _default_campaign()
     return None
 
 

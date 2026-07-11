@@ -52,8 +52,16 @@ def test_resolve_campaign_routing():
         # per-market var overrides even for the default market
         os.environ["INSTANTLY_CAMPAIGN_ID_HARRIS_TX"] = "harris-specific"
         assert resolve_campaign("harris_tx") == "harris-specific"
+        # nationwide mode: every market routes to the default campaign...
+        os.environ["LEAD_INTAKE_SHARED_CAMPAIGN"] = "1"
+        assert resolve_campaign("duval_fl") == "harris-default-id"
+        assert resolve_campaign("maricopa_az") == "harris-default-id"
+        # ...but explicit per-market overrides still win
+        assert resolve_campaign("putnam_fl") == "putnam-id"
+        os.environ.pop("LEAD_INTAKE_SHARED_CAMPAIGN", None)
     finally:
         os.environ.pop("INSTANTLY_CAMPAIGN_ID_HARRIS_TX", None)
+        os.environ.pop("LEAD_INTAKE_SHARED_CAMPAIGN", None)
         for k, v in saved.items():
             if v is None:
                 os.environ.pop(k, None)
