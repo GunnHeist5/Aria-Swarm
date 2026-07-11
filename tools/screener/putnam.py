@@ -52,14 +52,14 @@ def _dashed(account: str) -> str:
 def roads_config(config: ScreenerConfig = DEFAULT_CONFIG) -> tuple:
     """Ordered (url, name_fields) road-source candidates for this county.
 
-    FDOT's FLARIS is the richest (state+county+local+private) but its host
-    WAF-blocked the VPS on first contact; Census TIGER local roads is the
-    reachable insurance policy.
+    Census TIGER first: reachable (FDOT's host WAF-blocked the VPS) and
+    returns real street names. FLARIS stays as the richer backup for
+    whenever its WAF relents.
     """
 
     return (
-        (config.fl_roads_arcgis_url, config.fl_roads_name_fields),  # FDOT
         (config.tiger_roads_url, config.tiger_roads_name_fields),   # Census
+        (config.fl_roads_arcgis_url, config.fl_roads_name_fields),  # FDOT
     )
 
 

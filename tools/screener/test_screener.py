@@ -305,29 +305,22 @@ def test_roads_config_seam_orders_candidates():
 
     tx = harris.roads_config(DEFAULT_CONFIG)
     fl = putnam.roads_config(DEFAULT_CONFIG)
-    assert "TxDOT" in tx[0][0] and "tigerweb" in tx[1][0]
-    assert "fdot" in fl[0][0] and "tigerweb" in fl[1][0]
-    assert "ST_NAME" in fl[0][1] and "NAME" in fl[1][1]
+    # TIGER leads everywhere (real street names); state inventories back up
+    assert "tigerweb" in tx[0][0] and "TxDOT" in tx[1][0]
+    assert "tigerweb" in fl[0][0] and "fdot" in fl[1][0]
+    assert "NAME" in fl[0][1] and "ST_NAME" in fl[1][1]
 
 
 def test_frontage_stage_falls_through_road_candidates(tmp_path):
     from .cli import _frontage_stage
 
     calls = []
-    tiger_roads = {
-        "features": [{
-            "attributes": {"NAME": "Richland Dr"},  # TIGER's name field
-            "geometry": {"paths": [
-                [list(pt) for pt in from_local_feet([_road_ft], LON0, LAT0)[0]]
-            ]},
-        }]
-    }
 
     def stub(method, url, payload, key):
         calls.append(url)
-        if "tigerweb" in url:  # first candidate (TxDOT) is down
-            return 200, json.dumps(tiger_roads)
-        return 503, "state WAF says no"
+        if "TxDOT" in url:  # first candidate (TIGER) is down -> fall through
+            return 200, json.dumps(TXDOT_ROADS)
+        return 503, "census WAF says no"
 
     row = {"_bbox": (LON0 - 0.001, LAT0 - 0.001, LON0 + 0.001, LAT0 + 0.001),
            "_rings": NORMAL_RINGS}
@@ -338,7 +331,8 @@ def test_frontage_stage_falls_through_road_candidates(tmp_path):
                              overpass_request=lambda *a: (429, "no"),
                              sleep=lambda s: None, cache=None)
     assert result.get("frontage_street") == "Richland Dr"
-    assert any("tigerweb" in u for u in calls)
+    assert any("tigerweb" in u for u in calls)   # TIGER was tried first...
+    assert any("TxDOT" in u for u in calls)      # ...and TxDOT answered
 
 
 # ---------------------------------------------------------------------------

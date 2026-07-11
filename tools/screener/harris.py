@@ -34,11 +34,16 @@ def normalize_apn(apn: str | None) -> str | None:
 
 
 def roads_config(config: ScreenerConfig = DEFAULT_CONFIG) -> tuple:
-    """Ordered (url, name_fields) road-source candidates for this county."""
+    """Ordered (url, name_fields) road-source candidates for this county.
+
+    TIGER first: live-verified to return real street names ("Cluett St"),
+    where TxDOT's inventory labels local streets with route codes
+    ("CS1121805-KG") — frontage_street is operator-facing, names win.
+    """
 
     return (
-        (config.roads_arcgis_url, config.roads_name_fields),      # TxDOT
         (config.tiger_roads_url, config.tiger_roads_name_fields),  # Census
+        (config.roads_arcgis_url, config.roads_name_fields),       # TxDOT
     )
 
 
