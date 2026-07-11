@@ -243,6 +243,73 @@ def test_fetch_parcel_missing_and_error():
 
 
 # ---------------------------------------------------------------------------
+# putnam (FL) adapter
+# ---------------------------------------------------------------------------
+
+
+def test_putnam_normalize_apn():
+    from .putnam import _dashed, normalize_apn
+
+    assert normalize_apn("11-10-23-9303-0020-0230") == "111023930300200230"
+    assert normalize_apn("111023930300200230") == "111023930300200230"
+    assert normalize_apn("044-024-000-0280") is None      # 13 digits = not FL
+    assert normalize_apn(None) is None
+    assert _dashed("111023930300200230") == "11-10-23-9303-0020-0230"
+
+
+def test_putnam_fetch_parcel_retries_dashed_format():
+    from .putnam import fetch_parcel
+
+    fl_feature = {
+        "features": [{
+            "attributes": {"PARCELNO": "11-10-23-9303-0020-0230",
+                           "OWN_NAME": "SMITH JANE", "CO_NO": 64},
+            "geometry": {"rings": [[list(pt) for pt in NORMAL_RINGS[0]]]},
+        }]
+    }
+    wheres = []
+
+    def stub(method, url, payload, key):
+        wheres.append(url)
+        # stripped form finds nothing; the dashed retry hits
+        if "11-10-23-9303-0020-0230" in url:
+            return 200, json.dumps(fl_feature)
+        return 200, '{"features": []}'
+
+    parcel = fetch_parcel("111023930300200230", http_request=stub,
+                          sleep=lambda s: None)
+    assert parcel["owner"] == "SMITH JANE"
+    assert len(wheres) == 2                              # stripped, then dashed
+    assert all("CO_NO" in u for u in wheres)             # county scoping always
+
+
+def test_putnam_fetch_adjacent_excludes_self_in_both_formats():
+    from .putnam import fetch_adjacent
+
+    adj = {
+        "features": [
+            {"attributes": {"PARCELNO": "11-10-23-9303-0020-0230",  # self, dashed
+                            "OWN_NAME": "SMITH JANE"}},
+            {"attributes": {"PARCELNO": "11-10-23-9303-0020-0231",
+                            "OWN_NAME": "RIVER DEVELOPMENT LLC"}},
+        ]
+    }
+    out = fetch_adjacent("111023930300200230", NORMAL_RINGS,
+                         http_request=lambda *a: (200, json.dumps(adj)),
+                         sleep=lambda s: None)
+    assert [a["owner"] for a in out] == ["RIVER DEVELOPMENT LLC"]
+
+
+def test_roads_config_seam_picks_state_layer():
+    from . import harris, putnam
+
+    tx_url, tx_fields = harris.roads_config(DEFAULT_CONFIG)
+    fl_url, fl_fields = putnam.roads_config(DEFAULT_CONFIG)
+    assert "TxDOT" in tx_url and "fdot" in fl_url
+    assert "ST_NAME" in fl_fields
+
+
+# ---------------------------------------------------------------------------
 # frontage
 # ---------------------------------------------------------------------------
 

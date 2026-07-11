@@ -1,40 +1,63 @@
 """tools/screener/check.py — live endpoint self-check (contracts.py --check
 convention: prove the path before real leads hit it).
 
-Run ON THE VPS (the dev sandbox's egress can't reach GIS hosts):
+Run ON THE VPS (the dev sandbox's egress can't reach GIS hosts), once per
+county you screen:
 
-    python screen.py --check
+    python screen.py --check                     # harris (default)
+    python screen.py --check --county putnam
 
-Probes, each mapped to a brief acceptance test:
-  * HCAD: account 0440240000280 (Richland Dr, 77028) must return a polygon
-    that computes to shape_flag=SLIVER with adjacent owner names.
-  * FEMA: a reachable NFHL host must carry A/V-zone polygons around Hunting
-    Bayou (77028), and the point lookup must run end-to-end.
-  * Overpass: named roads must come back near the 77028 parcel.
-  * Brave: key validity (one cheap query) — skipped if no key configured.
+Probes per county:
+  * parcels: a known account must return a polygon with computable metrics
+    and adjacent owner names (Harris additionally asserts its acceptance
+    parcel is a SLIVER);
+  * FEMA: a reachable NFHL host must carry A/V-zone polygons in an envelope
+    around the county's town-center point, and a point lookup must run
+    end-to-end;
+  * roads: the state's roadway-inventory layer must return named roads for a
+    road-dense bbox (Overpass reported as informational fallback);
+  * Brave: key validity — skipped if not configured.
 
-Exit 0 iff every probe (except an explicitly skipped one) passes.
+Exit 0 iff every probe (except explicitly skipped ones) passes.
 """
 
 from __future__ import annotations
 
 import json
 
-from . import fema, frontage, harris
+from . import fema, frontage
 from .config import DEFAULT_CONFIG, ScreenerConfig
 from .geometry import parcel_metrics, shape_flag
 
-SLIVER_ACCOUNT = "0440240000280"  # Richland Dr strip (live: ~48x217, AR 4.5)
-FLOOD_POINT = (29.8280, -95.2861)          # Hunting Bayou area, 77028
+# Per-county probe fixtures. `account` is a real parcel in the county
+# (normalized form the adapter expects); `center` is a road-dense point near
+# mapped floodplain (Hunting Bayou / the St. Johns River at Palatka).
+COUNTY_PROBES = {
+    "harris": {
+        "account": "0440240000280",  # Richland Dr strip (live: ~48x217, AR 4.5)
+        "expect_sliver": True,
+        "center": (29.8280, -95.2861),
+    },
+    "putnam": {
+        "account": "111023930300200230",  # 11-10-23-9303-0020-0230 (PropStream)
+        "expect_sliver": False,
+        "center": (29.6486, -81.6376),    # Palatka
+    },
+}
 
 
 def run_check(config: ScreenerConfig = DEFAULT_CONFIG) -> int:
-    report: dict = {"probes": {}}
+    from .cli import COUNTY_ADAPTERS
+
+    county = COUNTY_ADAPTERS[config.county]
+    spec = COUNTY_PROBES[config.county]
+    account, center = spec["account"], spec["center"]
+    report: dict = {"county": config.county, "probes": {}}
     ok = True
 
-    # -- HCAD parcel + SLIVER acceptance ------------------------------------
-    parcel = harris.fetch_parcel(SLIVER_ACCOUNT, config)
-    probe: dict = {"account": SLIVER_ACCOUNT}
+    # -- parcel + geometry ----------------------------------------------------
+    parcel = county.fetch_parcel(account, config)
+    probe: dict = {"account": account}
     if parcel.get("error") or parcel.get("missing"):
         probe.update(ok=False, detail=parcel.get("error") or "not found")
         ok = False
@@ -42,9 +65,10 @@ def run_check(config: ScreenerConfig = DEFAULT_CONFIG) -> int:
         metrics = parcel_metrics(parcel["rings"]) or {}
         flag = shape_flag(
             metrics.get("width_ft", 0), metrics.get("aspect_ratio", 0), config)
-        adjacent = harris.fetch_adjacent(SLIVER_ACCOUNT, parcel["rings"], config)
+        adjacent = county.fetch_adjacent(account, parcel["rings"], config)
+        shape_ok = flag == "SLIVER" if spec["expect_sliver"] else bool(metrics)
         probe.update(
-            ok=flag == "SLIVER" and bool(adjacent),
+            ok=shape_ok and bool(adjacent),
             owner=parcel.get("owner"),
             width_ft=metrics.get("width_ft"),
             depth_ft=metrics.get("depth_ft"),
@@ -53,16 +77,15 @@ def run_check(config: ScreenerConfig = DEFAULT_CONFIG) -> int:
             adjacent_owners=[a["owner"] for a in adjacent][:8],
         )
         ok = ok and probe["ok"]
-    report["probes"]["hcad_sliver"] = probe
+    report["probes"]["parcel"] = probe
 
     # -- FEMA flood data ------------------------------------------------------
-    # Data-presence probe: 77028 is bisected by Hunting Bayou, so the flood
-    # layer MUST carry A/V-zone polygons in this envelope. This validates the
-    # host + query path without betting on one hand-picked coordinate sitting
-    # exactly inside a flood line.
+    # Data-presence probe: the center point sits near a major waterway, so
+    # the flood layer MUST carry A/V-zone polygons in this envelope. This
+    # validates host + query path without betting on one hand-picked
+    # coordinate sitting exactly inside a flood line.
     d = 0.025
-    envelope = (FLOOD_POINT[1] - d, FLOOD_POINT[0] - d,
-                FLOOD_POINT[1] + d, FLOOD_POINT[0] + d)
+    envelope = (center[1] - d, center[0] - d, center[1] + d, center[0] + d)
     sfha = fema.sfha_count_in_envelope(envelope, config)
     if sfha.get("error"):
         probe = {"ok": False, "detail": sfha["error"]}
@@ -70,11 +93,11 @@ def run_check(config: ScreenerConfig = DEFAULT_CONFIG) -> int:
         probe = {"ok": sfha["count"] > 0, "sfha_polygons": sfha["count"],
                  "source": sfha.get("source")}
     ok = ok and bool(probe["ok"])
-    report["probes"]["fema_sfha_77028"] = probe
+    report["probes"]["fema_sfha"] = probe
 
     # Point lookup exercised end-to-end (zone value is informational — the
     # exact code at a guessed point isn't an acceptance criterion).
-    zone = fema.flood_zone(*FLOOD_POINT, config)
+    zone = fema.flood_zone(*center, config)
     if zone.get("error"):
         probe = {"ok": False, "detail": zone["error"]}
         ok = False
@@ -85,18 +108,19 @@ def run_check(config: ScreenerConfig = DEFAULT_CONFIG) -> int:
     report["probes"]["fema_point_lookup"] = probe
 
     # -- Roads ---------------------------------------------------------------
-    # Probe a road-dense residential bbox, NOT the sliver parcel's own bbox —
-    # a sliver with no nearby road is the landlocked case, not a probe failure.
-    # TxDOT (Esri infra) is the primary source; Overpass is the fallback and
-    # its failure is only a warning while TxDOT answers.
+    # Probe a road-dense town-center bbox, NOT a parcel's own bbox — a parcel
+    # with no nearby road is the landlocked case, not a probe failure. The
+    # state roadway inventory is primary; Overpass is informational fallback.
     d = 0.002
-    bbox = (FLOOD_POINT[1] - d, FLOOD_POINT[0] - d,
-            FLOOD_POINT[1] + d, FLOOD_POINT[0] + d)
-    txdot = frontage.fetch_roads_arcgis(bbox, config)
-    report["probes"]["txdot_roads"] = (
-        {"ok": False, "detail": "fetch failed"}
-        if txdot is None
-        else {"ok": bool(txdot), "roads": sorted({r["name"] for r in txdot})[:8]}
+    bbox = (center[1] - d, center[0] - d, center[1] + d, center[0] + d)
+    roads_url, name_fields = county.roads_config(config)
+    state_roads = frontage.fetch_roads_arcgis(
+        bbox, config, url=roads_url, name_fields=name_fields)
+    report["probes"]["state_roads"] = (
+        {"ok": False, "detail": f"fetch failed ({roads_url})"}
+        if state_roads is None
+        else {"ok": bool(state_roads),
+              "roads": sorted({r["name"] for r in state_roads})[:8]}
     )
     overpass = frontage.fetch_roads(bbox, config)
     report["probes"]["overpass_fallback"] = (
@@ -105,7 +129,7 @@ def run_check(config: ScreenerConfig = DEFAULT_CONFIG) -> int:
         else {"ok": bool(overpass), "roads_found": len(overpass)}
     )
     # The pipeline needs at least ONE working road source.
-    ok = ok and (bool(txdot) or bool(overpass))
+    ok = ok and (bool(state_roads) or bool(overpass))
 
     # -- Brave key ------------------------------------------------------------
     try:
@@ -117,7 +141,7 @@ def run_check(config: ScreenerConfig = DEFAULT_CONFIG) -> int:
     if brave_key:
         from .comps import BraveClient
 
-        results = BraveClient(brave_key, config).search("77028 vacant land price")
+        results = BraveClient(brave_key, config).search("vacant land price per acre")
         probe = {"ok": bool(results), "results": len(results)}
         ok = ok and probe["ok"]
     else:

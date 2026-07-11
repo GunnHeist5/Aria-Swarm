@@ -121,17 +121,23 @@ def fetch_roads_arcgis(
     bbox_wgs84: tuple[float, float, float, float],
     config: ScreenerConfig = DEFAULT_CONFIG,
     *,
+    url: str | None = None,
+    name_fields: tuple | None = None,
     http_request=None,
     sleep=time.sleep,
     cache=None,
 ) -> list[dict] | None:
-    """Road centerlines from the TxDOT roadway inventory (ArcGIS polylines).
+    """Road centerlines from a state roadway-inventory layer (ArcGIS polylines).
 
-    Same contract as fetch_roads: None = couldn't check, [] = verified none.
+    Defaults to the TxDOT layer; county adapters pass their state's layer via
+    ``url``/``name_fields`` (see ``<adapter>.roads_config``). Same contract as
+    fetch_roads: None = couldn't check, [] = verified none.
     """
 
     from .arcgis import _request, query_layer
 
+    url = url or config.roads_arcgis_url
+    name_fields = name_fields or config.roads_name_fields
     w, s, e, n = bbox_wgs84
     lat0 = (s + n) / 2
     ft_lon, ft_lat = feet_per_degree(lat0)
@@ -142,7 +148,7 @@ def fetch_roads_arcgis(
         "spatialReference": {"wkid": 4326},
     })
     data = query_layer(
-        config.roads_arcgis_url,
+        url,
         {
             "geometry": envelope,
             "geometryType": "esriGeometryEnvelope",
@@ -156,7 +162,7 @@ def fetch_roads_arcgis(
         sleep=sleep,
         retry_delays=config.retry_delays_s,
         cache=cache,
-        cache_key="roadsgis:" + envelope,
+        cache_key=f"roadsgis:{url}:{envelope}",  # url: TX/FL layers never mix
     )
     if "error" in data:
         return None
@@ -164,7 +170,7 @@ def fetch_roads_arcgis(
     for feat in data.get("features") or []:
         attrs = feat.get("attributes") or {}
         name = next(
-            (str(attrs[f]).strip() for f in config.roads_name_fields
+            (str(attrs[f]).strip() for f in name_fields
              if attrs.get(f) and str(attrs[f]).strip()),
             "(unnamed road)",
         )

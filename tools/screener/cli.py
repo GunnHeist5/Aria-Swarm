@@ -27,14 +27,14 @@ try:
 except ImportError:
     pass
 
-from . import fema, frontage, harris
+from . import fema, frontage, harris, putnam
 from .cache import Cache
 from .comps import BraveAuthError, BraveClient, run_comps
 from .config import ScreenerConfig, config_hash, load_config
 from .geometry import lot_mismatch, parcel_metrics, shape_flag
 from .scoring import score_row
 
-COUNTY_ADAPTERS = {"harris": harris}
+COUNTY_ADAPTERS = {"harris": harris, "putnam": putnam}
 
 ENRICH_STAGES = ("geometry", "frontage", "flood", "comps")
 
@@ -108,13 +108,15 @@ def _geometry_stage(row: dict, config: ScreenerConfig, county, *,
     }
 
 
-def _frontage_stage(row: dict, config: ScreenerConfig, *, arcgis_request=None,
-                    overpass_request=None, sleep, cache) -> dict:
+def _frontage_stage(row: dict, config: ScreenerConfig, county=harris, *,
+                    arcgis_request=None, overpass_request=None, sleep,
+                    cache) -> dict:
+    roads_url, name_fields = county.roads_config(config)
     roads = None
-    if config.roads_arcgis_url:  # primary: TxDOT inventory (Esri infra)
+    if roads_url:  # primary: the state's roadway inventory (ArcGIS infra)
         roads = frontage.fetch_roads_arcgis(
-            row["_bbox"], config, http_request=arcgis_request,
-            sleep=sleep, cache=cache)
+            row["_bbox"], config, url=roads_url, name_fields=name_fields,
+            http_request=arcgis_request, sleep=sleep, cache=cache)
     if roads is None:  # fallback: OpenStreetMap via Overpass
         roads = frontage.fetch_roads(
             row["_bbox"], config, sleep=sleep, cache=cache,
@@ -194,7 +196,7 @@ def run_pipeline(
                 row["needs_manual_reason"] = "road data unavailable"
             else:
                 payload = cached_stage(row, "frontage", lambda: _frontage_stage(
-                    row, config, arcgis_request=http_request,
+                    row, config, county, arcgis_request=http_request,
                     overpass_request=overpass_request, sleep=sleep,
                     cache=cache))
                 row.update(payload)

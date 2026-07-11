@@ -265,9 +265,16 @@ kills run before any token spend; fetch failures fail closed to a
 
 ```bash
 python screen.py --check                      # live endpoint probes, run first
+python screen.py --check --county putnam      # per-county probes (FL)
 python screen.py leads.csv --limit 10         # sample run
+python screen.py leads.xlsx --county putnam   # Putnam County FL export
 python screen.py leads.csv --maps             # full run + SVG parcel sketches
 ```
+
+Counties are adapters (`tools/screener/harris.py`, `putnam.py`): parcels
+from the county/state cadastral layer, roads from the state roadway
+inventory (TxDOT / FDOT FLARIS), flood from the national NFHL. Adding a
+county = one adapter module + config endpoints + a `COUNTY_PROBES` entry.
 
 Outputs `out/enriched_leads.xlsx` (color-coded) + `out/summary.md`. Tunables
 live in `tools/screener/config.py` (overlay with `--config config.yaml`);

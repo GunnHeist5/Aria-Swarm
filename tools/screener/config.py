@@ -76,6 +76,20 @@ class ScreenerConfig:
     roads_name_fields: tuple = (
         "ST_NM", "STREET_NAME", "ST_NAME", "FULL_NAME", "ROAD_NAME", "RTE_NM",
     )
+    # -- Florida (Putnam) endpoints --
+    # Statewide FDOR cadastral on ArcGIS Online (FGIO) — parcels + OWN_NAME,
+    # covers all 67 counties; adapters scope queries by CO_NO.
+    fl_cadastral_url: str = (
+        "https://services9.arcgis.com/Gh9awoU677aKree0/arcgis/rest/services/"
+        "Florida_Statewide_Cadastral/FeatureServer/0"
+    )
+    # FDOT FLARIS All-Roads-Basemap streets (state+county+local+private).
+    fl_roads_arcgis_url: str = (
+        "https://gis.fdot.gov/arcgis/rest/services/sso/ssogis_flaris/"
+        "FeatureServer/5"
+    )
+    fl_roads_name_fields: tuple = ("ST_NAME", "STREET_NAME", "ROAD_NAME")
+
     # Fallback road source — Overpass mirrors in preference order; the
     # ecosystem rate-limits pipelines aggressively, so spread and stay polite.
     overpass_urls: tuple = (
