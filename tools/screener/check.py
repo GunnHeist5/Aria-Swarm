@@ -113,15 +113,19 @@ def run_check(config: ScreenerConfig = DEFAULT_CONFIG) -> int:
     # state roadway inventory is primary; Overpass is informational fallback.
     d = 0.002
     bbox = (center[1] - d, center[0] - d, center[1] + d, center[0] + d)
-    roads_url, name_fields = county.roads_config(config)
-    state_roads = frontage.fetch_roads_arcgis(
-        bbox, config, url=roads_url, name_fields=name_fields)
-    report["probes"]["state_roads"] = (
-        {"ok": False, "detail": f"fetch failed ({roads_url})"}
-        if state_roads is None
-        else {"ok": bool(state_roads),
-              "roads": sorted({r["name"] for r in state_roads})[:8]}
-    )
+    any_roads = False
+    candidates = {}
+    for roads_url, name_fields in county.roads_config(config):
+        host = roads_url.split("/")[2]
+        roads = frontage.fetch_roads_arcgis(
+            bbox, config, url=roads_url, name_fields=name_fields)
+        if roads is None:
+            candidates[host] = {"ok": False, "detail": "fetch failed"}
+        else:
+            candidates[host] = {"ok": bool(roads),
+                                "roads": sorted({r["name"] for r in roads})[:6]}
+            any_roads = any_roads or bool(roads)
+    report["probes"]["road_sources"] = candidates
     overpass = frontage.fetch_roads(bbox, config)
     report["probes"]["overpass_fallback"] = (
         {"ok": None, "detail": "unreachable (fallback only)"}
@@ -129,7 +133,7 @@ def run_check(config: ScreenerConfig = DEFAULT_CONFIG) -> int:
         else {"ok": bool(overpass), "roads_found": len(overpass)}
     )
     # The pipeline needs at least ONE working road source.
-    ok = ok and (bool(state_roads) or bool(overpass))
+    ok = ok and (any_roads or bool(overpass))
 
     # -- Brave key ------------------------------------------------------------
     try:

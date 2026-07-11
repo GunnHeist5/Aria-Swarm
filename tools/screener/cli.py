@@ -111,12 +111,15 @@ def _geometry_stage(row: dict, config: ScreenerConfig, county, *,
 def _frontage_stage(row: dict, config: ScreenerConfig, county=harris, *,
                     arcgis_request=None, overpass_request=None, sleep,
                     cache) -> dict:
-    roads_url, name_fields = county.roads_config(config)
     roads = None
-    if roads_url:  # primary: the state's roadway inventory (ArcGIS infra)
+    for roads_url, name_fields in county.roads_config(config):
+        if not roads_url:
+            continue
         roads = frontage.fetch_roads_arcgis(
             row["_bbox"], config, url=roads_url, name_fields=name_fields,
             http_request=arcgis_request, sleep=sleep, cache=cache)
+        if roads is not None:  # answered ([] = verified no roads, still an answer)
+            break
     if roads is None:  # fallback: OpenStreetMap via Overpass
         roads = frontage.fetch_roads(
             row["_bbox"], config, sleep=sleep, cache=cache,

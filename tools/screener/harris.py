@@ -33,10 +33,13 @@ def normalize_apn(apn: str | None) -> str | None:
     return digits if len(digits) == 13 else None
 
 
-def roads_config(config: ScreenerConfig = DEFAULT_CONFIG) -> tuple[str, tuple]:
-    """(roads layer URL, street-name field candidates) for this county."""
+def roads_config(config: ScreenerConfig = DEFAULT_CONFIG) -> tuple:
+    """Ordered (url, name_fields) road-source candidates for this county."""
 
-    return config.roads_arcgis_url, config.roads_name_fields
+    return (
+        (config.roads_arcgis_url, config.roads_name_fields),      # TxDOT
+        (config.tiger_roads_url, config.tiger_roads_name_fields),  # Census
+    )
 
 
 def _rings(feature: dict) -> list[list[tuple[float, float]]]:

@@ -90,6 +90,15 @@ class ScreenerConfig:
     )
     fl_roads_name_fields: tuple = ("ST_NAME", "STREET_NAME", "ROAD_NAME")
 
+    # Census TIGERweb local roads — nationwide, every local street, federal
+    # infrastructure. Second-choice road source for ALL counties (state
+    # inventories are richer, but TIGER answers when a state WAF doesn't).
+    tiger_roads_url: str = (
+        "https://tigerweb.geo.census.gov/arcgis/rest/services/TIGERweb/"
+        "Transportation_LargeScale/MapServer/2"
+    )
+    tiger_roads_name_fields: tuple = ("NAME", "BASENAME", "FULLNAME")
+
     # Fallback road source — Overpass mirrors in preference order; the
     # ecosystem rate-limits pipelines aggressively, so spread and stay polite.
     overpass_urls: tuple = (
