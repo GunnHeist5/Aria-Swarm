@@ -11,13 +11,23 @@ Drop a PropStream export into the inbox and this loads it end to end:
 Wired to a systemd `.path` unit that watches the inbox; also runnable by hand:
     /root/Aria-Swarm/.venv/bin/python -m tools.integrations.lead_intake
 
+Multi-market: the file's dominant County+State become its market key (e.g.
+``harris_tx``, ``putnam_fl``). Desk data routes per market (point
+``DEALDESK_EXPORT_PATH`` at a DIRECTORY and each market keeps its own file);
+the Instantly push routes to ``INSTANTLY_CAMPAIGN_ID_<MARKET>`` (the default
+market falls back to the original ``INSTANTLY_CAMPAIGN_ID``). A market with
+no campaign configured is staged — desk data only, no outreach — never
+cross-posted into another market's campaign.
+
 Env (all optional, sane VPS defaults):
     LEADS_INBOX=/root/leads_inbox         drop files here
     LEADS_ARCHIVE=/root/leads_processed   moved here on success
     LEADS_FAILED=/root/leads_failed       moved here on failure
-    DEALDESK_EXPORT_PATH=/root/land_export.xlsx   the desk reads this
+    DEALDESK_EXPORT_PATH=/root/land_exports   file (legacy) or directory
     DEALDESK_SERVICE=aria-dealdesk        restarted after refresh
     LEAD_INTAKE_PUSH_LIMIT=100000         cap per push (effectively uncapped)
+    LEAD_INTAKE_DEFAULT_MARKET=harris_tx  market that owns INSTANTLY_CAMPAIGN_ID
+    INSTANTLY_CAMPAIGN_ID_PUTNAM_FL=...   per-market campaign ids
 """
 
 from __future__ import annotations
@@ -79,28 +89,122 @@ def _stable(path: Path, checks: int = 3, interval: float = 2.0) -> bool:
     return last > 0
 
 
+def market_key(rows: list[dict]) -> str | None:
+    """'harris_tx' / 'putnam_fl' from the export's County+State columns.
+
+    PURE. The dominant (county, state) pair wins — a stray mis-tagged row
+    can't reroute the file. None when the export has no usable geography.
+    """
+
+    from collections import Counter
+
+    pairs = Counter(
+        (
+            str(r.get("County") or "").strip().lower().replace(" ", ""),
+            str(r.get("State") or "").strip().lower(),
+        )
+        for r in rows
+    )
+    for (county, state), _count in pairs.most_common():
+        if county and state:
+            return f"{county}_{state}"
+    return None
+
+
+def resolve_campaign(market: str | None) -> str | None:
+    """Instantly campaign for a market: INSTANTLY_CAMPAIGN_ID_<MARKET>.
+
+    The default market (LEAD_INTAKE_DEFAULT_MARKET, harris_tx) falls back to
+    the original INSTANTLY_CAMPAIGN_ID so existing setups keep working.
+    None = no campaign configured -> the intake stages the file (desk data
+    only) instead of cross-posting a market into the wrong campaign.
+    """
+
+    if market:
+        specific = os.environ.get(f"INSTANTLY_CAMPAIGN_ID_{market.upper()}")
+        if specific:
+            return specific
+    default_market = os.environ.get("LEAD_INTAKE_DEFAULT_MARKET", "harris_tx")
+    if market == default_market or market is None:
+        return os.environ.get("INSTANTLY_CAMPAIGN_ID")
+    return None
+
+
+def _existing_market(export: Path) -> str | None:
+    try:
+        from tools.integrations.leadfile import parse_propstream
+
+        return market_key(parse_propstream(export))
+    except Exception:  # noqa: BLE001 — unreadable/missing => no constraint
+        return None
+
+
+def _refresh_desk(path: Path, market: str | None) -> None:
+    """Route the file into the desk's export set and restart the desk.
+
+    Directory mode (DEALDESK_EXPORT_PATH is a dir): each market gets its own
+    file, so a Putnam drop can never clobber Harris pricing data. Legacy
+    single-file mode: overwrite only when the incoming market matches what
+    the desk already serves — mismatches are refused loudly.
+    """
+
+    if DESK_EXPORT.is_dir():
+        stem = market or "default"
+        for old in DESK_EXPORT.glob(f"{stem}.*"):  # one file per market
+            old.unlink()
+        target = DESK_EXPORT / f"{stem}{path.suffix.lower()}"
+    else:
+        current = _existing_market(DESK_EXPORT)
+        if current and market and current != market:
+            _log(
+                f"deal-desk NOT updated: desk serves '{current}' but file is "
+                f"'{market}'. Point DEALDESK_EXPORT_PATH at a directory to "
+                f"serve multiple markets."
+            )
+            return
+        target = DESK_EXPORT
+
+    shutil.copy2(path, target)
+    _log(f"deal-desk export updated -> {target}")
+    r = subprocess.run(["systemctl", "restart", DESK_SERVICE],
+                       capture_output=True, text=True)
+    _log(f"deal-desk restart rc={r.returncode} {r.stderr.strip()}")
+
+
 def _process(path: Path) -> bool:
-    """Feed the deal desk + push to Instantly. Returns True on a clean push."""
+    """Feed the deal desk + push to Instantly. Returns True on a clean run."""
 
     _log(f"intake start: {path.name} ({path.stat().st_size} bytes)")
 
-    # 1. Deal desk: copy the file to the export path + restart so it re-reads.
-    #    A desk-refresh failure is logged but does not fail the whole intake —
-    #    the Instantly load is the primary job.
     try:
-        shutil.copy2(path, DESK_EXPORT)
-        _log(f"deal-desk export updated -> {DESK_EXPORT}")
-        r = subprocess.run(["systemctl", "restart", DESK_SERVICE],
-                           capture_output=True, text=True)
-        _log(f"deal-desk restart rc={r.returncode} {r.stderr.strip()}")
+        from tools.integrations.leadfile import parse_propstream
+
+        market = market_key(parse_propstream(path))
+    except Exception as exc:  # noqa: BLE001
+        _log(f"unparseable export: {exc}")
+        return False
+    _log(f"market: {market or 'UNKNOWN'}")
+
+    # 1. Deal desk refresh — failure is logged but doesn't fail the intake.
+    try:
+        _refresh_desk(path, market)
     except Exception as exc:  # noqa: BLE001
         _log(f"deal-desk refresh FAILED (continuing to push): {exc}")
 
-    # 2. Instantly push via the tested adapter (suppression + dedup built in).
+    # 2. Instantly push, routed to the market's campaign.
+    campaign = resolve_campaign(market)
+    if not campaign:
+        _log(
+            f"no campaign for market '{market}' — desk data staged, no leads "
+            f"pushed. Set INSTANTLY_CAMPAIGN_ID_{(market or 'X').upper()} to "
+            f"enable outreach for this market."
+        )
+        return True  # staged as intended, not a failure
+
     try:
         r = subprocess.run(
             [sys.executable, "-m", "tools.integrations.instantly", str(path),
-             "--push", "--limit", PUSH_LIMIT],
+             "--push", "--limit", PUSH_LIMIT, "--campaign-id", campaign],
             cwd=str(_REPO), capture_output=True, text=True, timeout=1800,
         )
         if r.stdout:

@@ -88,16 +88,38 @@ def _to_record(row: dict) -> PropertyRecord:
 
 
 class FileLookup:
-    """Property lookup backed by a PropStream ``.xlsx``/``.csv`` export."""
+    """Property lookup backed by PropStream ``.xlsx``/``.csv`` export(s).
+
+    ``path`` may be a single export file (the original single-market mode) or
+    a DIRECTORY of per-market exports (e.g. ``harris_tx.xlsx`` +
+    ``putnam_fl.xlsx``) — every export in the directory is merged into one
+    index, so the desk can price any market's inbound call. On key collisions
+    the first file (sorted by name) wins; per-market files keyed by market
+    never collide in practice.
+    """
 
     def __init__(self, path: str | Path):
         self.by_apn: dict[str, PropertyRecord] = {}
         self.by_addr: dict[str, PropertyRecord] = {}
         self.by_email: dict[str, PropertyRecord] = {}
+        self.sources: list[str] = []
+        root = Path(path)
+        files = (
+            sorted(p for p in root.iterdir()
+                   if p.is_file() and p.suffix.lower() in (".xlsx", ".csv"))
+            if root.is_dir() else [root]
+        )
+        if not files:
+            raise FileNotFoundError(f"no lead exports in directory: {root}")
+        for file in files:
+            self._index(file)
+
+    def _index(self, path: Path) -> None:
+        self.sources.append(str(path))
         for row in parse_propstream(path):
             rec = _to_record(row)
             if rec.apn:
-                self.by_apn[_norm_apn(rec.apn)] = rec
+                self.by_apn.setdefault(_norm_apn(rec.apn), rec)
             key = _norm_address(rec.address)
             if key:
                 self.by_addr.setdefault(key, rec)
