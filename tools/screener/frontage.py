@@ -216,8 +216,11 @@ def compute_frontage(
 ) -> dict:
     """PURE. {"frontage": "NONE"|feet, "frontage_street": str|None}.
 
-    frontage_ft = length of the road centerline crossing the parcel's
-    ~5 ft buffer — a proxy for the shared edge with the right-of-way.
+    frontage_ft ~= length of the PARCEL BOUNDARY that lies within
+    ``road_buffer_ft`` of a road centerline. Buffering the road (not the
+    parcel) and intersecting with the boundary keeps the measurement close
+    to the true shared edge; it slightly overstates on corners, which is
+    fine for a screening signal.
     """
 
     flat = [pt for ring in rings_wgs84 for pt in ring]
@@ -228,14 +231,14 @@ def compute_frontage(
     parcel = _polygon_from_rings(to_local_feet(rings_wgs84, lon0, lat0))
     if parcel is None:
         return {"frontage": "NONE", "frontage_street": None}
-    buffered = parcel.buffer(config.road_buffer_ft)
+    boundary = parcel.boundary
 
     best_ft, best_name = 0.0, None
     for road in roads:
         if len(road.get("coords") or []) < 2:
             continue
         line = LineString(to_local_feet([road["coords"]], lon0, lat0)[0])
-        shared = line.intersection(buffered)
+        shared = boundary.intersection(line.buffer(config.road_buffer_ft))
         if shared.is_empty:
             continue
         length = shared.length

@@ -348,7 +348,20 @@ def test_frontage_present_with_street_name():
     assert isinstance(result["frontage"], int) and result["frontage"] > 50
 
 
+def test_frontage_across_right_of_way_gap():
+    # THE real-world case: parcel polygons stop at the right-of-way edge and
+    # the road CENTERLINE sits ~30 ft beyond it. This exact geometry came
+    # back "landlocked" for 100% of live parcels under the old 5 ft reach.
+    centerline_30ft_out = [(-50.0, 90.0), (170.0, 90.0)]  # lot top edge y=60
+    roads = [{"name": "Oakington Dr",
+              "coords": from_local_feet([centerline_30ft_out], LON0, LAT0)[0]}]
+    result = compute_frontage(NORMAL_RINGS, roads)
+    assert result["frontage_street"] == "Oakington Dr"
+    assert result["frontage"] >= 120          # the full fronting edge counts
+
+
 def test_frontage_none_when_far():
+    # 500 ft away (well past any right-of-way) stays landlocked
     far = [{"name": "Far Rd", "coords":
             from_local_feet([[(-50.0, 500.0), (170.0, 500.0)]], LON0, LAT0)[0]}]
     result = compute_frontage(NORMAL_RINGS, far)

@@ -23,7 +23,12 @@ class ScreenerConfig:
     aspect_ratio_max: float = 4.0     # min-rotated-rect long/short above this => SLIVER
     min_width_ft: float = 50.0        # short side below this => SLIVER
     lot_mismatch_pct: float = 0.15    # GIS area vs CSV lot size disagreement flag
-    road_buffer_ft: float = 5.0       # parcel buffer for the frontage intersection test
+    # Frontage reach: parcels stop at the right-of-way EDGE while road data
+    # draws the CENTERLINE, typically 25-40 ft away (half the ROW). 60 ft
+    # bridges residential + collector ROWs without reaching across a
+    # neighboring lot (typ. 100+ ft deep). The brief's 5 ft assumed parcel
+    # polygons touching the road — county parcel fabrics don't.
+    road_buffer_ft: float = 60.0
 
     # -- valuation / fees (stage 6) --
     buyer_ceiling_ratio: float = 0.75  # retail * this = investor buyer ceiling (0.70-0.80)
