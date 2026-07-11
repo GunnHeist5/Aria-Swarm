@@ -399,6 +399,48 @@ def test_fetch_roads_arcgis_parses_paths_and_names():
     assert empty == []                               # verified no roads
 
 
+def test_fetch_roads_arcgis_converts_web_mercator():
+    from .frontage import _mercator_to_lonlat, fetch_roads_arcgis
+
+    # roundtrip sanity on the pure converter: project LON0/LAT0 forward with
+    # the standard spherical-mercator formulas, then invert
+    import math
+
+    r = 6378137.0
+    mx = math.radians(LON0) * r
+    my = r * math.log(math.tan(math.pi / 4 + math.radians(LAT0) / 2))
+    lon, lat = _mercator_to_lonlat(mx, my)
+    assert abs(lon - LON0) < 1e-9 and abs(lat - LAT0) < 1e-9
+
+    # a TIGER-style response: declared Web Mercator, meter coordinates
+    merc = {
+        "spatialReference": {"wkid": 102100, "latestWkid": 3857},
+        "features": [{
+            "attributes": {"NAME": "Richland Dr"},
+            "geometry": {"paths": [[[mx, my], [mx + 100.0, my]]]},
+        }],
+    }
+    bbox = (LON0 - 0.001, LAT0 - 0.001, LON0 + 0.001, LAT0 + 0.001)
+    roads = fetch_roads_arcgis(bbox, http_request=lambda *a: (200, json.dumps(merc)),
+                               sleep=lambda s: None)
+    (rlon, rlat) = roads[0]["coords"][0]
+    assert abs(rlon - LON0) < 0.001 and abs(rlat - LAT0) < 0.001
+
+    # magnitude-based detection with NO declared wkid (belt and suspenders)
+    merc_nosr = {"features": merc["features"]}
+    roads2 = fetch_roads_arcgis(bbox,
+                                http_request=lambda *a: (200, json.dumps(merc_nosr)),
+                                sleep=lambda s: None)
+    assert abs(roads2[0]["coords"][0][0] - LON0) < 0.001
+
+    # unrecognizable CRS -> None (failure), never a false landlocked kill
+    weird = {"features": [{"attributes": {"NAME": "X"},
+                           "geometry": {"paths": [[[9e9, 9e9], [9e9, 9e9]]]}}]}
+    assert fetch_roads_arcgis(bbox,
+                              http_request=lambda *a: (200, json.dumps(weird)),
+                              sleep=lambda s: None) is None
+
+
 def test_overpass_remark_timeout_is_failure_not_no_roads():
     # HTTP 200 + "remark" is Overpass saying it gave up — NOT "no roads here";
     # reading it as empty would false-kill the lead as landlocked.

@@ -44,6 +44,11 @@ def test_resolve_campaign_routing():
         assert resolve_campaign("putnam_fl") == "putnam-id"
         # unconfigured market -> None (stage, never cross-post)
         assert resolve_campaign("duval_fl") is None
+        # default market falls back to the secrets DEFAULTS registry when the
+        # env var is absent (the VPS stores the id there, not in .env)
+        os.environ.pop("INSTANTLY_CAMPAIGN_ID", None)
+        assert resolve_campaign("harris_tx")  # secrets DEFAULTS provides it
+        os.environ["INSTANTLY_CAMPAIGN_ID"] = "harris-default-id"
         # per-market var overrides even for the default market
         os.environ["INSTANTLY_CAMPAIGN_ID_HARRIS_TX"] = "harris-specific"
         assert resolve_campaign("harris_tx") == "harris-specific"

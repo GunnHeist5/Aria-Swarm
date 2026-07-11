@@ -126,7 +126,14 @@ def resolve_campaign(market: str | None) -> str | None:
             return specific
     default_market = os.environ.get("LEAD_INTAKE_DEFAULT_MARKET", "harris_tx")
     if market == default_market or market is None:
-        return os.environ.get("INSTANTLY_CAMPAIGN_ID")
+        # get_secret, not os.environ: the default campaign id may live in the
+        # secrets DEFAULTS registry rather than .env (it did on the VPS).
+        try:
+            from tools.integrations.secrets import get_secret
+
+            return get_secret("INSTANTLY_CAMPAIGN_ID")
+        except Exception:  # noqa: BLE001
+            return os.environ.get("INSTANTLY_CAMPAIGN_ID")
     return None
 
 

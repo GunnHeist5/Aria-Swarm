@@ -121,10 +121,21 @@ def run_check(config: ScreenerConfig = DEFAULT_CONFIG) -> int:
             bbox, config, url=roads_url, name_fields=name_fields)
         if roads is None:
             candidates[host] = {"ok": False, "detail": "fetch failed"}
+        elif not roads:
+            candidates[host] = {"ok": False, "detail": "no roads returned"}
         else:
-            candidates[host] = {"ok": bool(roads),
-                                "roads": sorted({r["name"] for r in roads})[:6]}
-            any_roads = any_roads or bool(roads)
+            # Names are not enough — a wrong coordinate system returns nice
+            # names with roads on another continent (seen live: every parcel
+            # "landlocked"). The first vertex must be near the probe center.
+            lon, lat = roads[0]["coords"][0]
+            near = abs(lon - center[1]) < 0.1 and abs(lat - center[0]) < 0.1
+            candidates[host] = {
+                "ok": near,
+                "roads": sorted({r["name"] for r in roads})[:6],
+                "coords_geographic": near,
+                "sample_vertex": [round(lon, 4), round(lat, 4)],
+            }
+            any_roads = any_roads or near
     report["probes"]["road_sources"] = candidates
     overpass = frontage.fetch_roads(bbox, config)
     report["probes"]["overpass_fallback"] = (

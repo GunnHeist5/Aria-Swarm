@@ -166,6 +166,12 @@ def fetch_roads_arcgis(
     )
     if "error" in data:
         return None
+    # Some servers (TIGERweb) hand geometry back in Web Mercator meters even
+    # when outSR=4326 is requested. Coordinates like (-10.6M, 3.5M) parsed as
+    # lon/lat put every road on another planet -> every parcel "landlocked".
+    # Detect by declared wkid or by magnitude and convert; can't tell -> fail.
+    wkid = ((data.get("spatialReference") or {}).get("latestWkid")
+            or (data.get("spatialReference") or {}).get("wkid"))
     roads = []
     for feat in data.get("features") or []:
         attrs = feat.get("attributes") or {}
@@ -176,9 +182,31 @@ def fetch_roads_arcgis(
         )
         for path in (feat.get("geometry") or {}).get("paths") or []:
             coords = [tuple(pt[:2]) for pt in path]
-            if len(coords) >= 2:
-                roads.append({"name": name, "coords": coords})
+            if len(coords) < 2:
+                continue
+            x0, y0 = coords[0]
+            mercator = wkid in (3857, 102100) or abs(x0) > 360 or abs(y0) > 90
+            if mercator:
+                # Web Mercator's valid extent is ~±20,037,508 m; anything
+                # beyond that is some OTHER projection — refuse to guess,
+                # a wrong guess silently landlocks every parcel.
+                if any(abs(x) > 20_100_000 or abs(y) > 20_100_000
+                       for x, y in coords):
+                    return None
+                coords = [_mercator_to_lonlat(x, y) for x, y in coords]
+            roads.append({"name": name, "coords": coords})
     return roads
+
+
+def _mercator_to_lonlat(x: float, y: float) -> tuple[float, float]:
+    """EPSG:3857 meters -> WGS84 (lon, lat) degrees. Pure math, no deps."""
+
+    import math
+
+    r = 6378137.0
+    lon = math.degrees(x / r)
+    lat = math.degrees(2.0 * math.atan(math.exp(y / r)) - math.pi / 2.0)
+    return lon, lat
 
 
 def compute_frontage(
