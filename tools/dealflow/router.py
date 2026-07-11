@@ -71,8 +71,19 @@ async def telegram_callback(
         # Not a button tap — maybe the operator talking to the deal desk.
         message = update.get("message") or {}
         token, chat_id = _telegram()
-        if (message.get("text") and chat_id
-                and str((message.get("chat") or {}).get("id")) == str(chat_id)):
+        from_operator = (chat_id and
+                         str((message.get("chat") or {}).get("id")) == str(chat_id))
+        # A document from the operator = a lead file. Download + intake runs
+        # off-thread (Telegram wants its 200 now); the bot reports back there.
+        if message.get("document") and from_operator:
+            from . import leads_in
+
+            threading.Thread(
+                target=leads_in.handle_document, args=(message,),
+                kwargs={"token": token, "chat_id": chat_id}, daemon=True,
+            ).start()
+            return {"ok": True, "leads": "ingesting"}
+        if message.get("text") and from_operator:
             from . import chat as deal_chat
 
             # Answer off-thread: the LLM takes seconds, Telegram wants its 200 now.

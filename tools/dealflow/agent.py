@@ -33,10 +33,14 @@ brief — plain text, no headers, no markdown. You have tools: use them instead 
 of guessing. You can look up any lead's lot and price band, list pending deals, \
 record a verbally-agreed deal at a specific price (this only sends the operator \
 an Accept/Decline prompt — a contract goes out ONLY after they tap Accept), and \
-suppress an opted-out address. You cannot send emails — the operator sends from \
-Instantly; when they need email text, write it for them (anchored at the \
-opening number, never stating or exceeding the ceiling). Numbers from tools \
-beat numbers from memory. Deal red flags to enforce: never confirm a buyer or \
+suppress an opted-out address, and add a new lead the operator dictates \
+(add_lead — it flows through the same dedupe/suppression/outreach pipeline as \
+a file drop; no email on the lead means deal-desk only, no outreach). The \
+operator can also just attach a PropStream .xlsx/.csv to the chat — tell them \
+that when they ask how to load many leads. You cannot send emails — the \
+operator sends from Instantly; when they need email text, write it for them \
+(anchored at the opening number, never stating or exceeding the ceiling). \
+Numbers from tools beat numbers from memory. Deal red flags to enforce: never confirm a buyer or \
 send an assignment before the seller's purchase agreement is signed; a buyer \
 asking for a 50% equity split / silent-partner arrangement is a reject (use \
 MaxDispo's fee-only model instead); past Day 9 with no confirmed buyer, the \
@@ -59,6 +63,31 @@ SPECS = [
         "description": "List every deal in the approval pipeline with its status "
                        "(proposed, pending_approval, contract_sent, signed, declined).",
         "input_schema": {"type": "object", "properties": {}},
+    },
+    {
+        "name": "add_lead",
+        "description": "Add ONE lead the operator dictated. Writes it into the "
+                       "lead pipeline: dedupe, suppression, market routing, "
+                       "deal-desk pricing data, and (if it has an email) the "
+                       "Instantly campaign. Ask for the address at minimum; "
+                       "fill only fields the operator actually gave.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "address": {"type": "string"},
+                "city": {"type": "string"},
+                "state": {"type": "string", "description": "2-letter"},
+                "zip": {"type": "string"},
+                "county": {"type": "string"},
+                "apn": {"type": "string"},
+                "first_name": {"type": "string"},
+                "last_name": {"type": "string"},
+                "email": {"type": "string"},
+                "phone": {"type": "string"},
+                "lot_sqft": {"type": "number"},
+            },
+            "required": ["address"],
+        },
     },
     {
         "name": "agree_deal",
@@ -203,6 +232,25 @@ class Toolbox:
                                               chat_id=self.chat_id)
         return {"ok": True, "deal_id": deal_id,
                 "note": "Accept/Decline prompt sent — contract goes out only on Accept"}
+
+    def add_lead(self, address: str, city: str = "", state: str = "",
+                 zip: str = "", county: str = "", apn: str = "",
+                 first_name: str = "", last_name: str = "", email: str = "",
+                 phone: str = "", lot_sqft: float | None = None) -> dict:
+        from . import leads_in
+
+        path = leads_in.add_lead_row({
+            "Address": address, "City": city, "State": state.upper(),
+            "Zip": zip, "County": county, "APN": apn,
+            "Owner 1 First Name": first_name, "Owner 1 Last Name": last_name,
+            "Email 1": email, "Phone 1": phone,
+            "Lot Size Sqft": lot_sqft or "",
+        })
+        report = leads_in._run_intake(path.name)
+        return {"ok": True, "staged_as": path.name, "intake": report,
+                "note": ("no email on this lead -> deal-desk data only, no "
+                         "outreach" if not email else "flows to outreach if "
+                         "not suppressed/duplicate")}
 
     def suppress_lead(self, email: str) -> dict:
         self.suppression.add(email)
