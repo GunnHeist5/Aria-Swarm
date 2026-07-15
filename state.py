@@ -66,6 +66,7 @@ TriggerType = Literal[
     "seller_reply",
     "deal_closed",
     "new_leads_synced",
+    "pipeline_replenish",
     "offer_accepted",
     "contract_signed",
     "buyer_confirmed",

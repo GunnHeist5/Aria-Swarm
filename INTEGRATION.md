@@ -283,6 +283,34 @@ without them the deterministic stages still run. Results cache per
 (account, stage, config-hash) in `~/.automaton/screener_cache.db`, so
 interrupted runs resume and re-runs are free.
 
+## PropStream browser runner — leads pulled without an API (`tools/browser`)
+
+PropStream has no public API, so the pull is browser-driven (Playwright) in an
+isolated runner, decoupled from the graph. It logs in with a reused first-party
+session, applies the vacant-land filter stack, skip-traces, exports the CSV, and
+drops it into `/root/leads_inbox` — where the normal intake takes over
+(suppress → market route → **Instantly via API**, no browser). The runner ends
+at "file in inbox"; Instantly is never browser-automated.
+
+```bash
+python -m tools.browser.cli seed-login                       # ONE-TIME human login
+python -m tools.browser.cli --check --county harris --state tx --headful   # calibrate selectors
+python -m tools.browser.cli pull --county harris --state tx  # a real pull
+```
+
+ToS-respecting by design: one human seed-login captures `storage_state` (0600)
+that scheduled runs reuse, human-cadence pacing, a hard `max_export_rows` cap,
+and **fail-closed HITL freeze** on any CAPTCHA/2FA/verification wall (fires the
+Telegram webhook, never auto-solves). Selectors live as data in
+`tools/browser/config.py` (overlay `browser.yaml`), so DOM drift is a config
+edit calibrated by `--check`, never a redeploy. Env: `PROPSTREAM_USERNAME` /
+`PROPSTREAM_PASSWORD` in `.env`. See DEPLOY.md for the systemd timer + bring-up.
+
+Swarm hook: the `pipeline_replenish` trigger lets the metabolic loop record
+"pull more leads" intent (e.g. in the `deal_closed` node); `tools/browser/hook.py`
+executes it out-of-band and fires `new_leads_synced` on success — the browser
+never runs inside a graph invoke.
+
 ## Exit codes
 
 `0` done · `1` cycle error (state preserved) · `2` frozen awaiting HITL

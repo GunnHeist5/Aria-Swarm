@@ -34,6 +34,11 @@ dependencies = [
     "shapely==2.1.1",
     "openpyxl==3.1.5",
     "pyyaml==6.0.2",
+
+    # Browser runner (tools/browser) — the Web2 bridge for API-less sites
+    # (PropStream pulls today; County-Clerk deed pulls later). Imported lazily
+    # so the rest of the swarm runs without a browser installed.
+    "playwright==1.55.0",
 ]
 
 [build-system]

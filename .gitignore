@@ -10,6 +10,10 @@ env/
 out/
 enriched_leads.xlsx
 
+# Browser runner session material — storage_state is a live credential
+tools/browser/browser.yaml
+storage_state.json
+
 # Local state / secrets (the swarm wallet lives in ~/.automaton, but guard against strays)
 *.sqlite
 *.sqlite3

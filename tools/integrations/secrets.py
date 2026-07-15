@@ -45,7 +45,11 @@ REQUIRED: dict[str, list[str]] = {
     "instantly_webhook": ["INSTANTLY_WEBHOOK_SECRET"],
     "liquid": ["LIQUID_API_KEY"],
     "dealdesk": ["DEALDESK_API_KEY", "DEALDESK_EXPORT_PATH"],
+    # Vestigial: PropStream has no public API (2026). The lead pull is browser-
+    # driven (tools/browser) and reads propstream_browser, not this key.
     "propstream": ["PROPSTREAM_API_KEY"],
+    # Browser runner login (tools/browser) — first-party session, never logged.
+    "propstream_browser": ["PROPSTREAM_USERNAME", "PROPSTREAM_PASSWORD"],
     "pandadoc": [
         "PANDADOC_API_KEY",
         "PANDADOC_PURCHASE_TEMPLATE_ID",

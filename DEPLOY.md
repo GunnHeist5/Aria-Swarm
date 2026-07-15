@@ -123,6 +123,42 @@ A CRM/Zapier webhook can call this same command on a "deal closed" trigger. See
 
 ---
 
+## PropStream browser runner (Playwright) — one-time bring-up
+
+Pulls filtered vacant-land leads from PropStream (no API) into `/root/leads_inbox`,
+where the normal intake takes over. Setup, as the VPS user in `/root/Aria-Swarm`:
+
+```bash
+.venv/bin/pip install "playwright==1.55.0"
+PLAYWRIGHT_BROWSERS_PATH=/root/.automaton/ms-playwright \
+  .venv/bin/playwright install chromium            # unprivileged, ~450 MB
+sudo .venv/bin/playwright install-deps chromium    # root: apt libs
+apt-get install -y xvfb                             # headful seed-login on a headless box
+
+# creds in .env (never in chat/logs):
+#   PROPSTREAM_USERNAME=...    PROPSTREAM_PASSWORD=...
+
+# 1) ONE-TIME human login — captures the reusable session (0600):
+xvfb-run -a .venv/bin/python -m tools.browser.cli seed-login
+#    log in fully, accept cookies, clear any 2FA, press Enter.
+
+# 2) Calibrate selectors against the real logged-in DOM (prints FOUND/MISSING +
+#    screenshots). Fix any MISSING key in tools/browser/browser.yaml, re-run:
+.venv/bin/python -m tools.browser.cli --check --county harris --state tx --headful
+
+# 3) A real pull once --check is green:
+.venv/bin/python -m tools.browser.cli pull --county harris --state tx
+```
+
+Scheduled daily pull — `/etc/systemd/system/aria-propstream.service` (Type=oneshot,
+`EnvironmentFile=/root/Aria-Swarm/.env`, `Environment=PLAYWRIGHT_BROWSERS_PATH=/root/.automaton/ms-playwright`,
+`ExecStart=/root/Aria-Swarm/.venv/bin/python -m tools.browser.cli pull --county harris --state tx`)
+plus `aria-propstream.timer` (`OnCalendar=*-*-* 09:00`, `RandomizedDelaySec=1800`).
+Then `systemctl enable --now aria-propstream.timer`. A CAPTCHA/2FA wall freezes and
+pings Telegram; re-run `seed-login` to refresh the session.
+
+---
+
 ## Health & safety
 
 - **State**: `cat ~/.automaton/state_snapshot.json | python3 -m json.tool` —
