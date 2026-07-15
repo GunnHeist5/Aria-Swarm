@@ -138,17 +138,38 @@ apt-get install -y xvfb                             # headful seed-login on a he
 # creds in .env (never in chat/logs):
 #   PROPSTREAM_USERNAME=...    PROPSTREAM_PASSWORD=...
 
-# 1) ONE-TIME human login — captures the reusable session (0600):
-xvfb-run -a .venv/bin/python -m tools.browser.cli seed-login
-#    log in fully, accept cookies, clear any 2FA, press Enter.
-
-# 2) Calibrate selectors against the real logged-in DOM (prints FOUND/MISSING +
-#    screenshots). Fix any MISSING key in tools/browser/browser.yaml, re-run:
-.venv/bin/python -m tools.browser.cli --check --county harris --state tx --headful
-
-# 3) A real pull once --check is green:
+# 1) A real pull once the session is seeded + selectors calibrated (below):
 .venv/bin/python -m tools.browser.cli pull --county harris --state tx
 ```
+
+**The session + calibration (the one part that needs a screen).** A headless VPS
+can't show you a browser to log in / see the real page, so do this on your
+LAPTOP and ship the results over:
+
+```bash
+# ON YOUR LAPTOP (has Chrome + a screen). No repo needed — one file:
+#   download tools/browser/seed_propstream.py, then:
+pip install playwright && playwright install chromium
+python seed_propstream.py            # Chrome opens -> log in fully -> press Enter
+#   -> writes propstream_storage_state.json
+
+# ship that ONE file to the VPS (from the laptop terminal):
+scp propstream_storage_state.json root@YOUR_VPS:/root/.automaton/propstream/storage_state.json
+# then on the VPS:  chmod 600 /root/.automaton/propstream/storage_state.json
+```
+
+Calibrate selectors (PropStream's real buttons/fields; the defaults are guesses).
+Run on the VPS after the session is in place — it uses the seeded session, prints
+FOUND/MISSING per selector, and screenshots each to `~/.automaton/propstream/artifacts`:
+
+```bash
+.venv/bin/python -m tools.browser.cli --check --county harris --state tx
+```
+
+For any `[MISSING]` key, view its screenshot, then set that key in
+`tools/browser/browser.yaml` (a `selectors:` block — selectors are NOT secret, so
+you can even commit it and `git pull`) and re-run `--check` until `RESULT: OK`.
+Then the `pull` command above works, unattended.
 
 Scheduled daily pull — `/etc/systemd/system/aria-propstream.service` (Type=oneshot,
 `EnvironmentFile=/root/Aria-Swarm/.env`, `Environment=PLAYWRIGHT_BROWSERS_PATH=/root/.automaton/ms-playwright`,

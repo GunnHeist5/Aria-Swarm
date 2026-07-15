@@ -217,6 +217,24 @@ def test_load_config_yaml_overlay_and_selectors(tmp_path):
         assert "not_a_field" in str(exc)
 
 
+def test_real_driver_requires_session_without_playwright(tmp_path):
+    # The missing-session guard must fire BEFORE Playwright is imported, so a
+    # laptop-seeded session that never got shipped fails clearly (not with an
+    # ImportError) even on a box where Playwright isn't installed.
+    from tools.browser.driver import BrowserError
+    from tools.browser.session import real_driver
+
+    cfg = DEFAULT_CONFIG.mutate(storage_state=str(tmp_path / "absent.json"),
+                                download_dir=str(tmp_path / "dl"),
+                                artifact_dir=str(tmp_path / "art"))
+    try:
+        with real_driver(cfg):
+            pass
+        assert False, "expected BrowserError for a missing session"
+    except BrowserError as exc:
+        assert "storage_state" in str(exc) or "session" in str(exc)
+
+
 def test_flow_imports_no_playwright():
     import sys
 

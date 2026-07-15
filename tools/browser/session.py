@@ -16,7 +16,7 @@ from contextlib import contextmanager
 from pathlib import Path
 
 from .config import BrowserConfig, DEFAULT_CONFIG, load_selectors
-from .driver import AuthChallenge
+from .driver import AuthChallenge, BrowserError
 
 
 def resolve_credentials(config: BrowserConfig = DEFAULT_CONFIG) -> tuple[str, str]:
@@ -30,11 +30,8 @@ def resolve_credentials(config: BrowserConfig = DEFAULT_CONFIG) -> tuple[str, st
 
 
 def _ensure_dirs(config: BrowserConfig) -> None:
-    for raw, mode in ((config.user_data_dir, 0o700),
-                      (config.download_dir, 0o700),
-                      (config.artifact_dir, 0o700)):
-        p = Path(raw).expanduser()
-        p.mkdir(parents=True, exist_ok=True, mode=mode)
+    for raw in (config.download_dir, config.artifact_dir):
+        Path(raw).expanduser().mkdir(parents=True, exist_ok=True, mode=0o700)
     state = Path(config.storage_state).expanduser()
     state.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
 
@@ -42,37 +39,44 @@ def _ensure_dirs(config: BrowserConfig) -> None:
 @contextmanager
 def real_driver(config: BrowserConfig = DEFAULT_CONFIG, *, headless: bool | None = None,
                 selectors_path: str | None = None):
-    """Yield a live PlaywrightPageDriver in a persistent, authenticated context."""
+    """Yield a live PlaywrightPageDriver, session loaded from storage_state.json.
+
+    The session is a single PORTABLE file (seed on a laptop, ship it here). The
+    existence check runs BEFORE importing Playwright, so a missing session fails
+    with a clear message even where Playwright isn't installed.
+    """
+
+    _ensure_dirs(config)
+    state_path = Path(config.storage_state).expanduser()
+    if not state_path.exists():
+        raise BrowserError(
+            f"no PropStream session at {state_path} — seed it on a machine with "
+            "a screen (see DEPLOY.md) and copy storage_state.json here")
+    selectors = load_selectors(selectors_path)
 
     from playwright.sync_api import sync_playwright
 
     from .playwright_driver import PlaywrightPageDriver
 
-    _ensure_dirs(config)
-    selectors = load_selectors(selectors_path)
-    state_path = Path(config.storage_state).expanduser()
     with sync_playwright() as p:
-        # A persistent context carries the authenticated session in its
-        # user_data_dir profile — launch_persistent_context does NOT accept a
-        # storage_state kwarg. storage_state.json is kept only as a portable
-        # backup (seed on a laptop, scp to the VPS), written on exit below.
-        context = p.chromium.launch_persistent_context(
-            user_data_dir=str(Path(config.user_data_dir).expanduser()),
+        browser = p.chromium.launch(
             headless=config.headless if headless is None else headless,
-            accept_downloads=True,
             args=["--disable-blink-features=AutomationControlled"],
         )
-        page = context.pages[0] if context.pages else context.new_page()
+        context = browser.new_context(
+            storage_state=str(state_path), accept_downloads=True)
+        page = context.new_page()
         page.set_default_timeout(config.default_timeout_ms)
         try:
             yield PlaywrightPageDriver(page, selectors, config)
         finally:
-            try:
+            try:  # refresh the rolling session so it doesn't age out
                 context.storage_state(path=str(state_path))
                 os.chmod(state_path, 0o600)
             except Exception:  # noqa: BLE001
                 pass
             context.close()
+            browser.close()
 
 
 def seed_login(config: BrowserConfig = DEFAULT_CONFIG) -> None:
@@ -87,13 +91,11 @@ def seed_login(config: BrowserConfig = DEFAULT_CONFIG) -> None:
     _ensure_dirs(config)
     state_path = Path(config.storage_state).expanduser()
     with sync_playwright() as p:
-        context = p.chromium.launch_persistent_context(
-            user_data_dir=str(Path(config.user_data_dir).expanduser()),
+        browser = p.chromium.launch(
             headless=False,
-            accept_downloads=True,
-            args=["--disable-blink-features=AutomationControlled"],
-        )
-        page = context.pages[0] if context.pages else context.new_page()
+            args=["--disable-blink-features=AutomationControlled"])
+        context = browser.new_context(accept_downloads=True)
+        page = context.new_page()
         page.goto(config.login_url)
         print("\nA browser window is open. Log in to PropStream fully — accept "
               "the cookie banner, complete any 2FA — until you see your "
@@ -102,8 +104,9 @@ def seed_login(config: BrowserConfig = DEFAULT_CONFIG) -> None:
         context.storage_state(path=str(state_path))
         os.chmod(state_path, 0o600)
         context.close()
-    print(f"Session captured -> {state_path} (0600). Scheduled pulls can now "
-          "run unattended.")
+        browser.close()
+    print(f"Session captured -> {state_path} (0600). Ship this file to the VPS; "
+          "scheduled pulls then run unattended.")
 
 
 def freeze_hitl(reason: str, config: BrowserConfig = DEFAULT_CONFIG, *,

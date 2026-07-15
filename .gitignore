@@ -10,9 +10,11 @@ env/
 out/
 enriched_leads.xlsx
 
-# Browser runner session material — storage_state is a live credential
-tools/browser/browser.yaml
+# Browser runner: the session file is a live credential — never commit it.
+# (browser.yaml holds only calibrated selectors, not secrets, so it CAN be
+#  committed and pulled to the VPS — it is intentionally not ignored.)
 storage_state.json
+propstream_storage_state.json
 
 # Local state / secrets (the swarm wallet lives in ~/.automaton, but guard against strays)
 *.sqlite
