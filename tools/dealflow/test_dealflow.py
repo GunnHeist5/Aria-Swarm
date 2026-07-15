@@ -344,6 +344,15 @@ def test_contracts_check_setup():
         rep2 = contracts.check_setup(http_request=lambda *a: (200, empty))
         assert rep2["ok"] and not rep2["fill_ok"] and "warning" in rep2
 
+        # UPLOADED template: no tokens, but Text boxes with matching
+        # merge-field names — that's a valid fill path (fill_ok true).
+        boxed = ('{"name": "Purchase Agreement", "roles": [{"name": "Client"}], '
+                 '"tokens": [], "fields": [{"merge_field": "seller_name"}, '
+                 '{"merge_field": "purchase_price"}, {"merge_field": "Signature"}]}')
+        rep3 = contracts.check_setup(http_request=lambda *a: (200, boxed))
+        assert rep3["ok"] and rep3["fill_ok"] and "warning" not in rep3
+        assert rep3["fields_matched"] == ["purchase_price", "seller_name"]
+
         bad = contracts.check_setup(http_request=lambda *a: (401, "denied"))
         assert not bad["ok"] and bad["status_code"] == 401
 

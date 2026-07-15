@@ -125,7 +125,13 @@ def create_and_send(deal: dict, *, api_key: str, template_id: str,
         "name": f"Purchase Agreement — {fields['property_address'] or 'Property'}",
         "template_uuid": template_id,
         "recipients": recipients,
+        # Fill BOTH mechanisms; PandaDoc ignores names a template doesn't have:
+        #   tokens -> {{placeholders}} typed in a native-editor document body;
+        #   fields -> Text boxes overlaid on an UPLOADED document, matched by
+        #             each box's merge-field name (Justin's templates are
+        #             uploaded docs, so this is the path that actually fills).
         "tokens": [{"name": k, "value": str(v)} for k, v in fields.items()],
+        "fields": {k: {"value": str(v)} for k, v in fields.items()},
         "metadata": {"deal_id": deal.get("deal_id")},
     }
     return _dispatch_document(
@@ -179,7 +185,10 @@ def create_and_send_assignment(deal: dict, *, api_key: str, template_id: str,
         "name": f"Assignment Agreement — {fields['property_address'] or 'Property'}",
         "template_uuid": template_id,
         "recipients": recipients,
+        # tokens for native-editor {{placeholders}}, fields for merge-named
+        # Text boxes on an uploaded document (see create_and_send).
         "tokens": [{"name": k, "value": str(v)} for k, v in fields.items()],
+        "fields": {k: {"value": str(v)} for k, v in fields.items()},
         "metadata": {"deal_id": deal.get("deal_id"), "kind": "assignment"},
     }
     return _dispatch_document(
@@ -253,16 +262,19 @@ def check_setup(*, http_request=_request, template_id: str | None = None,
     out["template_tokens"] = sorted(n for n in token_names if n)
     out["template_fields"] = sorted(n for n in field_names if n)
     out["tokens_matched"] = sorted(ours & token_names)
+    out["fields_matched"] = sorted(ours & field_names)
     out["unmatched_ours"] = sorted(ours - token_names - field_names)
     # ok above means key+template reachable; fill_ok means a sent document
-    # would actually carry deal data. A template with zero matching tokens
-    # sends contracts with every merge value silently blank.
-    out["fill_ok"] = bool(out["tokens_matched"])
+    # would actually carry deal data — via {{tokens}} in a native-editor body
+    # OR via Text boxes whose merge-field names match ours (the mechanism for
+    # UPLOADED documents, which is what Justin's templates are).
+    out["fill_ok"] = bool(out["tokens_matched"] or out["fields_matched"])
     if not out["fill_ok"]:
         out["warning"] = (
-            "NO deal data would be filled in: the template has no matching "
-            "{{tokens}}. Open the template in the PandaDoc editor and add "
-            "{{token}} placeholders named exactly as in unmatched_ours."
+            "NO deal data would be filled in. Uploaded template: add Text "
+            "boxes over the blanks and set each box's merge-field name to one "
+            "of unmatched_ours. Native-editor template: type {{token}} "
+            "placeholders named exactly as in unmatched_ours."
         )
     return out
 
