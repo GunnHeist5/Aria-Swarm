@@ -98,14 +98,13 @@ def _run_check(config, args) -> int:
     try:
         with real_driver(config, headless=config.headless,
                          selectors_path=args.config) as driver:
-            from . import propstream
-
             driver.goto(config.app_url)
-            # Best-effort: get to the filter view so those selectors can resolve.
-            try:
-                propstream.login(driver, config, "", "")
-            except Exception:  # noqa: BLE001 — check maps state, doesn't require login success
-                pass
+            # Map whichever state we're in WITHOUT submitting a login form: if
+            # the seeded session is live we probe app/filter selectors; if not,
+            # land on the login page so login.* selectors resolve. Never POST
+            # empty credentials (avoids failed-login noise / lockout).
+            if not driver.is_present("app.ready", timeout_ms=4000):
+                driver.goto(config.login_url)
             report = calibrate(driver, config)
     except Exception as exc:  # noqa: BLE001
         print(f"calibration could not launch a browser: {exc}", file=sys.stderr)

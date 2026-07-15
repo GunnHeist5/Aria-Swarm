@@ -52,12 +52,15 @@ def real_driver(config: BrowserConfig = DEFAULT_CONFIG, *, headless: bool | None
     selectors = load_selectors(selectors_path)
     state_path = Path(config.storage_state).expanduser()
     with sync_playwright() as p:
+        # A persistent context carries the authenticated session in its
+        # user_data_dir profile — launch_persistent_context does NOT accept a
+        # storage_state kwarg. storage_state.json is kept only as a portable
+        # backup (seed on a laptop, scp to the VPS), written on exit below.
         context = p.chromium.launch_persistent_context(
             user_data_dir=str(Path(config.user_data_dir).expanduser()),
             headless=config.headless if headless is None else headless,
             accept_downloads=True,
             args=["--disable-blink-features=AutomationControlled"],
-            storage_state=str(state_path) if state_path.exists() else None,
         )
         page = context.pages[0] if context.pages else context.new_page()
         page.set_default_timeout(config.default_timeout_ms)

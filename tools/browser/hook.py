@@ -44,6 +44,9 @@ def pipeline_replenish(county: str, state: str, *, config: BrowserConfig | None 
         return {"ok": False, "error": f"auth_challenge: {exc}", "frozen": True}
     except BrowserError as exc:
         return {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
+    except Exception as exc:  # noqa: BLE001 — raw Playwright timeouts/errors must
+        # not escape into cron/CLI; a drifted selector is the common case here.
+        return {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
 
     if fire_event:
         _fire_new_leads_synced(county, state)
@@ -53,8 +56,10 @@ def pipeline_replenish(county: str, state: str, *, config: BrowserConfig | None 
 def _fire_new_leads_synced(county: str, state: str) -> None:
     """Tell the swarm the pipeline grew (existing event; bookkeeping only)."""
 
-    payload = ('{"source": "propstream_browser", '
-               f'"county": "{county}", "state": "{state}"}}')
+    import json
+
+    payload = json.dumps({"source": "propstream_browser",
+                          "county": county, "state": state})
     try:
         subprocess.run(
             [sys.executable, "main.py", "--event", "new_leads_synced",

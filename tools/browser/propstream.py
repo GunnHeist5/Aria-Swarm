@@ -98,11 +98,19 @@ def apply_filters(driver: PageDriver, config: BrowserConfig, county: str,
     _verify(driver, "filters", config)
 
     count = driver.result_count("filters.result_count")
-    if count is not None and count > config.max_export_rows:
+    # Fail CLOSED: an unreadable count (drifted 'filters.result_count' selector)
+    # must NOT silently disengage the guardrail and let an unbounded skip-trace
+    # (costs money per record) + export proceed. No count => refuse.
+    if count is None:
+        raise VerificationError(
+            "could not read the result-count chip — calibrate "
+            "'filters.result_count'; refusing to skip-trace/export without a "
+            "confirmed row count (ToS + spend guardrail)")
+    if count > config.max_export_rows:
         raise VerificationError(
             f"filtered count {count} exceeds max_export_rows "
-            f"{config.max_export_rows} — narrow the filters (ToS + suppression "
-            "cost guardrail); refusing to mass-export")
+            f"{config.max_export_rows} — narrow the filters; refusing to "
+            "mass-export")
     return count
 
 
@@ -138,13 +146,18 @@ def skiptrace(driver: PageDriver, config: BrowserConfig) -> None:
 
 
 def export(driver: PageDriver, config: BrowserConfig) -> str:
-    """Export the list to CSV; return the downloaded file path."""
+    """Export the list to CSV; return the downloaded file path.
 
-    if driver.is_present("export.confirm_csv", timeout_ms=1500):
-        driver.click("export.confirm_csv")
+    Menu shape (the researched PropStream flow): clicking Export opens a menu
+    whose CSV item is the actual download trigger, so the download is armed
+    around the CSV-item click, not the Export button. If the real UI downloads
+    directly off the Export button, calibrate export.* on the VPS.
+    """
+
     download_dir = str(Path(config.download_dir).expanduser())
     Path(download_dir).mkdir(parents=True, exist_ok=True)
-    return driver.expect_download("export.button", download_dir)
+    driver.click("export.button")   # open the export menu
+    return driver.expect_download("export.confirm_csv", download_dir)
 
 
 def move_to_inbox(src: str, county: str, state: str) -> Path:

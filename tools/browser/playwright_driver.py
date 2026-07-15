@@ -54,8 +54,9 @@ class PlaywrightPageDriver:
                        wait_until="domcontentloaded")
 
     def fill(self, key: str, value: str, *, delay_ms: int = 40) -> None:
-        self._loc(key).fill("", timeout=self.config.default_timeout_ms)
-        self._loc(key).type(value, delay=delay_ms)
+        loc = self._loc(key)
+        loc.fill("", timeout=self.config.default_timeout_ms)   # focus + clear
+        loc.press_sequentially(value, delay=delay_ms)          # human-cadence typing
 
     def click(self, key: str) -> None:
         self._loc(key).click(timeout=self.config.default_timeout_ms)

@@ -29,6 +29,8 @@ def _patch_inbox(tmp_path: Path) -> Path:
 def _driver(**kw) -> FakePageDriver:
     kw.setdefault("present_keys", HAPPY)
     kw.setdefault("download_path", "/tmp/aria_export_fixture.csv")
+    # a readable, in-bounds result count (the guard fails closed without one)
+    kw.setdefault("counts", {"filters.result_count": 240})
     return FakePageDriver(**kw)
 
 
@@ -130,6 +132,18 @@ def test_row_cap_guard_blocks_mass_export(tmp_path):
         assert False
     except VerificationError as exc:
         assert "exceeds max_export_rows" in str(exc)
+
+
+def test_row_cap_guard_fails_closed_on_unreadable_count(tmp_path):
+    _patch_inbox(tmp_path)
+    # filters verify, but the count chip is unreadable (None) -> must NOT export
+    d = FakePageDriver(present_keys=HAPPY, counts={})  # result_count -> None
+    try:
+        propstream.apply_filters(d, CFG, "harris", "tx")
+        assert False, "unreadable count must fail closed"
+    except VerificationError as exc:
+        assert "result-count" in str(exc)
+    assert d.index_of("expect_download") == -1
 
 
 def test_skiptrace_skipped_when_disabled(tmp_path):
