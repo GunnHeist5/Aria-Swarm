@@ -351,7 +351,7 @@ def main(argv: list[str] | None = None) -> int:
     # Pre-flight: sending from a template with no matching tokens produces a
     # contract with BLANK deal terms — say so loudly before creating anything.
     pre = check_setup()
-    if pre.get("ok") and not pre.get("tokens_matched"):
+    if pre.get("ok") and not pre.get("fill_ok"):
         print("⚠️  WARNING: the template has no matching variables — the document "
               "will send, but the address/price/terms will NOT auto-fill.\n"
               "    Add variables named exactly like our tokens (see "
