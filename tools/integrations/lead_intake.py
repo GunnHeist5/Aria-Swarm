@@ -237,7 +237,22 @@ def _process(path: Path) -> bool:
 
 
 def run_once() -> int:
-    """Process every stable file in the inbox; always clear it out afterward."""
+    """Process every stable file in the inbox; always clear it out afterward.
+
+    Serialized via an exclusive lock: the systemd watcher and a manual run can
+    otherwise both read the same inbox file before either archives it and
+    double-push it (harmless downstream — skip_if_in_campaign — but noisy).
+    """
+
+    import fcntl
+
+    LOG.parent.mkdir(parents=True, exist_ok=True)
+    lock = (LOG.parent / "lead_intake.lock").open("w")
+    try:
+        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        _log("another intake run holds the lock — skipping (it has the inbox)")
+        return 0
 
     INBOX.mkdir(parents=True, exist_ok=True)
     files = sorted(p for p in INBOX.iterdir()
