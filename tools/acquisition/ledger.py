@@ -107,6 +107,25 @@ _SCHEMA = (
         campaign_id TEXT NOT NULL,
         recipe TEXT, domain_pool TEXT
     )""",
+    """CREATE TABLE IF NOT EXISTS review_queue (
+        id TEXT PRIMARY KEY,
+        lead_email TEXT NOT NULL,
+        county_key TEXT, apn TEXT,
+        all_matches TEXT NOT NULL DEFAULT '[]',
+        eaccount TEXT, subject TEXT, ts TEXT,
+        reply_text TEXT,
+        classification TEXT, price_mentioned REAL,
+        verification TEXT, draft TEXT, draft_kind TEXT,
+        state TEXT NOT NULL DEFAULT 'new',
+        reason TEXT, snooze_until TEXT,
+        created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+    )""",
+)
+
+# Columns added after the first live deployment — applied idempotently.
+_MIGRATIONS = (
+    "ALTER TABLE leads ADD COLUMN retail_estimate REAL",
+    "ALTER TABLE leads ADD COLUMN evidence TEXT",
 )
 
 
@@ -116,6 +135,11 @@ def init_db(conn: sqlite3.Connection | None = None) -> None:
     try:
         for stmt in _SCHEMA:
             conn.execute(stmt)
+        for stmt in _MIGRATIONS:
+            try:
+                conn.execute(stmt)
+            except sqlite3.OperationalError:
+                pass  # column already exists
         conn.commit()
     finally:
         if own:
@@ -282,17 +306,23 @@ def set_status(county: str, apn: str, status: str, *, note: str | None = None,
 def write_enrichment(county: str, apn: str, *, verdict: str,
                      mao: float | None, open_at: float | None,
                      walk_at: float | None, source: str = "screener",
+                     retail_estimate: float | None = None,
+                     evidence: dict | None = None,
                      conn: sqlite3.Connection | None = None) -> None:
     """Write a screener/browsing result back and advance new -> screened/killed."""
 
     own = conn is None
     conn = conn or connect()
     try:
+        init_db(conn)
         cur = conn.execute(
             "UPDATE leads SET verdict=?, mao=?, open_at=?, walk_at=?, "
+            "retail_estimate=?, evidence=?, "
             "enrichment_source=?, screened_at=?, updated_at=? "
             "WHERE county_key=? AND apn=?",
-            (verdict, mao, open_at, walk_at, source, _stamp(), _stamp(),
+            (verdict, mao, open_at, walk_at,
+             retail_estimate, json.dumps(evidence) if evidence else None,
+             source, _stamp(), _stamp(),
              county, apn))
         if not cur.rowcount:
             raise LedgerError(f"no such lead: {county}/{apn}")

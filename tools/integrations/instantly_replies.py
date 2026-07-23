@@ -123,6 +123,8 @@ def extract_reply(item: dict) -> dict | None:
         "reply_text": text[:MAX_REPLY_CHARS],
         "ts": str(item.get("timestamp_email") or item.get("timestamp_created") or ""),
         "subject": str(item.get("subject") or ""),
+        # the mailbox that received it — required by POST /emails/reply later
+        "eaccount": str(item.get("eaccount") or ""),
     }
 
 

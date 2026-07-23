@@ -334,9 +334,32 @@ python acquire.py --check                         # live self-probes
 ```
 
 Default enrollment gate: only `SEND CONTRACT`/`NEGOTIATE` screener verdicts.
-`replies`/`review` (reply agent), `pull` (PropStream quota-tracked pulls) and
-`counties` (expansion scoring) ship with M2–M4; the negotiation rules live in
-`tools/acquisition/playbook.md`.
+
+**Reply agent (M2, draft-only).** `acquire replies` pulls campaign replies
+(reusing the schema-verified `instantly_replies` puller), matches each to the
+ledger by email (no match -> `needs_manual`, never a guessed APN), classifies
+(LLM, fail-closed), verifies (Rule 0: fresh county-record enrichment with a
+retail estimate, else the draft is a numberless HOLDING message), and drafts
+per `tools/acquisition/playbook.md`. STOPs are processed automatically and
+instantly — suppressed in the ledger + legacy store + removed from the
+campaign — even from unmatched senders. Every other outbound goes through
+`acquire review`:
+
+```bash
+python acquire.py replies                    # pull -> classify -> verify -> draft
+python acquire.py review                     # list pending drafts + evidence
+python acquire.py review approve <id>        # DRY-RUN: print the exact payload
+python acquire.py review approve <id> --send # human-approved send (threads the reply)
+python acquire.py review reject <id> --note "..."
+python acquire.py review snooze <id> --days 2
+```
+
+Structural guards, test-enforced: an unverified lead can only ever get a
+holding draft with zero dollar figures; a verified draft may contain only
+open_at (or a counter between open_at and MAO) — any other number bounces the
+draft to `needs_manual`. The approver-only decision footer (SIGN/COUNTER/WALK)
+is stripped before send; the compliance footer + STOP opt-out always ride.
+`pull` (M3) and `counties` (M4) are still stubs.
 
 ## Exit codes
 

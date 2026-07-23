@@ -62,7 +62,32 @@ def run_check(*, http_request=None) -> dict:
         out["instantly_auth"] = {"error": str(exc), "ok": False}
         out["ok"] = False
 
-    # 5. PropStream login probe — arrives with M3 (browser pull)
+    # 5. classify + draft dry run on a fixture reply (offline — stub LLM;
+    #    proves the reply pipeline's wiring and guards without spending tokens)
+    try:
+        from .reply.classify import classify_text
+        from .reply.draft import dollars_in, holding_draft, load_playbook
+
+        class _StubLLM:
+            def invoke(self, _prompt):
+                return ('{"classification": "interested_no_price", '
+                        '"price_mentioned": null, "summary": "fixture"}')
+
+        fixture = classify_text("How much would you offer for my land?",
+                                llm=_StubLLM())
+        hold = holding_draft({"reply_text": ""}, reason="fixture")
+        load_playbook()
+        out["reply_dry_run"] = {
+            "classify": fixture["classification"] == "interested_no_price",
+            "holding_has_no_number": dollars_in(hold["draft"]) == [],
+        }
+        if not all(out["reply_dry_run"].values()):
+            out["ok"] = False
+    except Exception as exc:  # noqa: BLE001
+        out["reply_dry_run"] = {"error": str(exc)}
+        out["ok"] = False
+
+    # 6. PropStream login probe — arrives with M3 (browser pull)
     out["propstream"] = "not built yet (M3)"
 
     return out

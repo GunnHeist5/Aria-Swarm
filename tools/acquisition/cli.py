@@ -97,6 +97,118 @@ def _cmd_mark(args, config) -> int:
     return 0
 
 
+def _real_llm():
+    """The drafting/classify model — same construction as the screener."""
+
+    import os
+
+    from langchain_anthropic import ChatAnthropic
+
+    return ChatAnthropic(
+        model=os.environ.get("CLAUDE_MODEL", "claude-sonnet-4-6"),
+        max_tokens=1500, temperature=0.2)
+
+
+def _cmd_replies(args, config) -> int:
+    from ..integrations.instantly import remove_lead_by_email
+    from ..integrations.secrets import SecretError, get_secret
+    from . import ledger as ledger_mod
+    from .reply import classify as classify_mod
+    from .reply import ingest as ingest_mod
+    from .reply import verify as verify_mod
+    from .reply import draft as draft_mod
+
+    try:
+        api_key = get_secret("INSTANTLY_API_KEY", required=True)
+        campaign_id = get_secret("INSTANTLY_CAMPAIGN_ID", required=True)
+    except SecretError as exc:
+        print(f"[replies] {exc}")
+        return 1
+    try:
+        llm = _real_llm()
+    except Exception as exc:  # noqa: BLE001
+        print(f"[replies] LLM unavailable ({exc}) — classification and "
+              "drafting need ANTHROPIC_API_KEY; ingest will still run")
+        llm = None
+
+    conn = ledger_mod.connect()
+    try:
+        r1 = ingest_mod.pull_and_ingest(api_key=api_key,
+                                        campaign_id=campaign_id, conn=conn)
+        print(f"[replies] ingest: {json.dumps(r1)}")
+        if llm is None:
+            return 0
+
+        def _remove(email: str):
+            return remove_lead_by_email(email, api_key=api_key,
+                                        campaign_id=campaign_id)
+
+        r2 = classify_mod.classify_pending(conn=conn, llm=llm,
+                                           remove_from_campaign=_remove)
+        print(f"[replies] classify: {json.dumps(r2)}")
+        r3 = verify_mod.verify_classified(config=config, conn=conn)
+        print(f"[replies] verify: {json.dumps(r3)}")
+        r4 = draft_mod.draft_verified(conn=conn, llm=llm)
+        print(f"[replies] draft: {json.dumps(r4)}")
+        n = len([1 for _ in conn.execute(
+            "SELECT 1 FROM review_queue WHERE state='pending_review'")])
+        print(f"[replies] {n} draft(s) awaiting review — `acquire review`")
+        return 0
+    finally:
+        conn.close()
+
+
+def _cmd_review(args, config) -> int:
+    from . import review as review_mod
+
+    if args.action == "list":
+        items = review_mod.pending()
+        if not items:
+            print("[review] queue is empty")
+            return 0
+        for it in items:
+            print(f"\n=== {it['id']} · {it['lead_email']} · "
+                  f"{it['county_key'] or '?'}/{it['apn'] or '?'} · "
+                  f"{it['classification'] or it['state']} ===")
+            print(f"reply: {(it['reply_text'] or '')[:400]}")
+            if it["draft"]:
+                print(f"--- draft ({it['draft_kind']}) ---\n{it['draft']}")
+            elif it["reason"]:
+                print(f"needs manual: {it['reason']}")
+        return 0
+    if args.action == "digest":
+        print(review_mod.digest())
+        return 0
+    if not args.id:
+        print("[review] approve/reject/snooze need an item id")
+        return 1
+    if args.action == "approve":
+        api_key = ""
+        if args.send:
+            from ..integrations.secrets import SecretError, get_secret
+
+            try:
+                api_key = get_secret("INSTANTLY_API_KEY", required=True)
+            except SecretError as exc:
+                print(f"[review] {exc}")
+                return 1
+        try:
+            result = review_mod.approve(args.id, send=args.send,
+                                        api_key=api_key)
+        except Exception as exc:  # noqa: BLE001
+            print(f"[review] {exc}")
+            return 1
+        print(json.dumps(result))
+        return 0
+    if args.action == "reject":
+        review_mod.reject(args.id, reason=args.note or "")
+        print(f"[review] rejected {args.id}")
+        return 0
+    until = review_mod.snooze(args.id, days=args.days)
+    print(f"[review] snoozed {args.id} until {until}")
+    return 0
+
+
 def _stub(milestone: str):
     def run(args, config) -> int:
         print(f"[acquire] this subcommand ships with {milestone} — not built yet")
@@ -151,8 +263,24 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--note", default=None)
     p.set_defaults(run=_cmd_mark)
 
-    for name, milestone in (("replies", "M2"), ("review", "M2"),
-                            ("pull", "M3"), ("counties", "M4")):
+    p = sub.add_parser("replies",
+                       help="Pull replies -> classify -> verify -> draft "
+                            "(drafts only; nothing is sent)")
+    p.set_defaults(run=_cmd_replies)
+
+    p = sub.add_parser("review", help="The approval queue")
+    p.add_argument("action", choices=("list", "approve", "reject", "snooze",
+                                      "digest"),
+                   nargs="?", default="list")
+    p.add_argument("id", nargs="?", default=None)
+    p.add_argument("--send", action="store_true",
+                   help="approve: actually send via Instantly (default: "
+                        "print the payload and do nothing)")
+    p.add_argument("--note", default=None, help="reject: reason")
+    p.add_argument("--days", type=float, default=1.0, help="snooze: days")
+    p.set_defaults(run=_cmd_review)
+
+    for name, milestone in (("pull", "M3"), ("counties", "M4")):
         p = sub.add_parser(name)
         p.set_defaults(run=_stub(milestone))
 
