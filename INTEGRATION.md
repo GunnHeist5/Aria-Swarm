@@ -311,6 +311,33 @@ Swarm hook: the `pipeline_replenish` trigger lets the metabolic loop record
 executes it out-of-band and fires `new_leads_synced` on success — the browser
 never runs inside a graph invoke.
 
+## Acquisition agent — the lead ledger + review-queue spine (`acquire.py`)
+
+`tools/acquisition/` is the single source of truth for every lead ever touched
+(SQLite `~/.automaton/acquisition.db`, keyed county+APN, full status history).
+Suppression and dedup are enforced in the ledger BEFORE any enrollment; leads
+in `negotiating`/`offer_out`/`contracted` are hard-excluded from all campaigns
+(`assert_enrollable` raises — never a quiet skip). STOP suppressions write
+through to the legacy opt-out store so both load paths honor them. Offer-box
+ratios are reused from the screener genome; autonomy flags default OFF — the
+reply agent (M2) drafts, the human sends.
+
+```bash
+python acquire.py ingest /root/land_exports/*.xlsx --mark-enrolled  # one-time historical import
+python acquire.py ingest new_pull.xlsx            # fresh leads -> status 'new'
+python acquire.py enroll --limit 200              # dry-run; --push to load
+python acquire.py enroll --push --include-unscreened   # pre-enrichment override (logged)
+python acquire.py suppress add x@y.com --reason STOP
+python acquire.py mark harris_tx 0440240000280 negotiating --note "verbal at 9k"
+python acquire.py status                          # counts, quota, suppression
+python acquire.py --check                         # live self-probes
+```
+
+Default enrollment gate: only `SEND CONTRACT`/`NEGOTIATE` screener verdicts.
+`replies`/`review` (reply agent), `pull` (PropStream quota-tracked pulls) and
+`counties` (expansion scoring) ship with M2–M4; the negotiation rules live in
+`tools/acquisition/playbook.md`.
+
 ## Exit codes
 
 `0` done · `1` cycle error (state preserved) · `2` frozen awaiting HITL

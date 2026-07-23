@@ -107,11 +107,15 @@ def push_leads(
     dry_run: bool = True,
     http_post=_http_post,
     sleep=time.sleep,
+    on_result=None,
 ) -> dict:
     """Push up to ``limit`` leads into the campaign. Returns a summary report.
 
     ``http_post``/``sleep`` are injectable for offline tests. In dry-run mode
     no network call is made — the report shows what WOULD be pushed.
+    ``on_result(lead, outcome)`` (optional) fires per attempted lead with
+    outcome ``pushed`` | ``skipped_existing`` | ``auth_error`` | ``error`` so
+    callers (the acquisition ledger) can record exactly who got in.
     """
 
     # Never (re-)load an opted-out address — CAN-SPAM, no exceptions. A fresh
@@ -150,6 +154,8 @@ def push_leads(
         if status in (401, 403):
             auth_failures += 1
             report["errors"] += 1
+            if on_result:
+                on_result(lead, "auth_error")
             if auth_failures >= MAX_AUTH_FAILURES:
                 report["aborted"] = f"auth_failed_x{auth_failures}"
                 break
@@ -158,11 +164,16 @@ def push_leads(
 
         if 200 <= status < 300:
             report["pushed"] += 1
+            outcome = "pushed"
         elif status == 409 or "already" in body.lower():
             report["skipped_existing"] += 1
+            outcome = "skipped_existing"
         else:
             report["errors"] += 1
+            outcome = "error"
             print(f"[instantly] {_mask_email(lead['email'])}: HTTP {status}")
+        if on_result:
+            on_result(lead, outcome)
         sleep(REQUEST_SPACING_S)
 
     return report
