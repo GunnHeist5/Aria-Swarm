@@ -359,7 +359,27 @@ holding draft with zero dollar figures; a verified draft may contain only
 open_at (or a counter between open_at and MAO) — any other number bounces the
 draft to `needs_manual`. The approver-only decision footer (SIGN/COUNTER/WALK)
 is stripped before send; the compliance footer + STOP opt-out always ride.
-`pull` (M3) and `counties` (M4) are still stubs.
+
+**Pulls, counties, enrichment (M3+M4).**
+
+```bash
+python acquire.py pull --county harris --state tx --recipe teardown_ratio --plan
+python acquire.py pull --county harris --state tx            # real browser pull
+python acquire.py enrich --county harris_tx --limit 50       # screener -> verdicts
+python acquire.py enrich --county brazoria_tx --browse-tasks tasks.md  # no adapter
+python acquire.py counties add brazoria_tx --growth-pct 5.5 --median-lot-value 65000 --data-gis --dispo-listings 220
+python acquire.py counties score                             # ranked expansion scorecard
+```
+
+Recipes (`vacant_land`, `teardown_ratio`, `commercial_vacant`) are declarative
+step lists over the browser runner's logical keys, all with ownership >= 5y;
+pulls are paced 2-5s/action, capped per session, quota-guarded against the
+50K/month budget BEFORE export (recorded in the ledger after), and a
+CAPTCHA/block freezes + writes a hand-runnable checklist — never bypassed.
+County scoring: growth 25 / band-fit 20 / data 25 / dispo 30 minus a -15
+guru-saturation penalty (Putnam/Marion/Polk FL, Mohave/Cochise AZ, Costilla
+CO, Valencia NM, far-west TX desert...). Counties without a screener adapter
+enrich via browsing-task briefs ingested back with reduced confidence.
 
 ## Exit codes
 

@@ -253,12 +253,98 @@ def _cmd_pull(args, config) -> int:
     return 0 if report.get("inbox_file") else 1
 
 
-def _stub(milestone: str):
-    def run(args, config) -> int:
-        print(f"[acquire] this subcommand ships with {milestone} — not built yet")
-        return 2
+def _cmd_counties(args, config) -> int:
+    from . import counties as counties_mod
 
-    return run
+    if args.action == "add":
+        if not args.county:
+            print("[counties] add needs a county key, e.g. brazoria_tx")
+            return 1
+        counties_mod.upsert(
+            args.county, growth_pct=args.growth_pct,
+            median_lot_value=args.median_lot_value, data_cad=args.data_cad,
+            data_gis=args.data_gis, data_tax=args.data_tax,
+            dispo_listings=args.dispo_listings, notes=args.notes)
+        print(f"[counties] {args.county} recorded")
+        return 0
+    if args.action == "research":
+        if not args.county or "_" not in args.county:
+            print("[counties] research needs a county key, e.g. brazoria_tx")
+            return 1
+        name, state = args.county.rsplit("_", 1)
+        try:
+            from ..screener.comps import BraveClient
+            from ..integrations.secrets import get_secret
+
+            brave = BraveClient(get_secret("BRAVE_API_KEY", required=True))
+            fields = counties_mod.research_county(
+                name, state,
+                search=lambda q: brave.search(q))
+        except Exception as exc:  # noqa: BLE001
+            print(f"[counties] research unavailable: {exc}")
+            return 1
+        counties_mod.upsert(args.county,
+                            growth_pct=fields.get("growth_pct"),
+                            notes=fields.get("notes"))
+        print(f"[counties] researched {args.county}: "
+              f"growth={fields.get('growth_pct')} (notes stored — fill the "
+              "rest with `counties add`)")
+        return 0
+    # score
+    cards = counties_mod.scorecard()
+    if not cards:
+        print("[counties] registry empty — `acquire counties add <key> ...`")
+        return 0
+    for c in cards:
+        gaps = f"  gaps: {', '.join(c['gaps'])}" if c["gaps"] else ""
+        sat = "  [GURU-SATURATED]" if c["saturated"] else ""
+        print(f"{c['score']:6.1f}  {c['county_key']:20}{sat}{gaps}")
+    return 0
+
+
+def _cmd_enrich(args, config) -> int:
+    from . import enrich as enrich_mod
+    from . import ledger as ledger_mod
+
+    if args.browse_tasks:
+        tasks = enrich_mod.browsing_tasks(args.county, limit=args.limit)
+        if not tasks:
+            print(f"[enrich] no 'new' leads for {args.county}")
+            return 0
+        from pathlib import Path
+
+        Path(args.browse_tasks).write_text("\n\n---\n\n".join(tasks),
+                                           encoding="utf-8")
+        print(f"[enrich] {len(tasks)} browsing task(s) -> {args.browse_tasks}")
+        return 0
+
+    run_screener = None
+    if enrich_mod.ADAPTER_BY_MARKET.get(args.county):
+        from ..screener.cli import COUNTY_ADAPTERS, run_pipeline
+        from ..screener.config import DEFAULT_CONFIG as SCREENER_CONFIG
+        from ..screener.cache import Cache
+
+        brave = llm = None
+        try:
+            from ..screener.comps import BraveClient
+            from ..integrations.secrets import get_secret
+
+            brave = BraveClient(get_secret("BRAVE_API_KEY", required=True))
+            llm = _real_llm()
+        except Exception as exc:  # noqa: BLE001
+            print(f"[enrich] comps disabled ({exc}) — geometry/flood/roads "
+                  "still run; verdicts needing comps go needs_manual")
+
+        def run_screener(rows, adapter_name):
+            return run_pipeline(rows, SCREENER_CONFIG,
+                                county=COUNTY_ADAPTERS[adapter_name],
+                                llm=llm, brave=brave, cache=Cache())
+
+    report = enrich_mod.enrich_county(args.county, config=config,
+                                      limit=args.limit,
+                                      run_screener=run_screener)
+    print(json.dumps(report, indent=2))
+    return 0
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -333,8 +419,27 @@ def main(argv: list[str] | None = None) -> int:
                    help="print the recipe plan + quota headroom; no browser")
     p.set_defaults(run=_cmd_pull)
 
-    p = sub.add_parser("counties")
-    p.set_defaults(run=_stub("M4"))
+    p = sub.add_parser("counties", help="Expansion scorecard (agent "
+                                        "recommends; human picks)")
+    p.add_argument("action", choices=("add", "score", "research"),
+                   nargs="?", default="score")
+    p.add_argument("county", nargs="?", default=None,
+                   help="county key for add/research, e.g. brazoria_tx")
+    p.add_argument("--growth-pct", type=float, default=None)
+    p.add_argument("--median-lot-value", type=float, default=None)
+    p.add_argument("--data-cad", action="store_true", default=None)
+    p.add_argument("--data-gis", action="store_true", default=None)
+    p.add_argument("--data-tax", action="store_true", default=None)
+    p.add_argument("--dispo-listings", type=int, default=None)
+    p.add_argument("--notes", default=None)
+    p.set_defaults(run=_cmd_counties)
+
+    p = sub.add_parser("enrich", help="Screen 'new' ledger leads -> verdicts")
+    p.add_argument("--county", required=True, help="e.g. harris_tx")
+    p.add_argument("--limit", type=int, default=50)
+    p.add_argument("--browse-tasks", default=None, metavar="OUT.md",
+                   help="no adapter: write browsing research tasks to a file")
+    p.set_defaults(run=_cmd_enrich)
 
     args = parser.parse_args(argv)
     if args.check:
