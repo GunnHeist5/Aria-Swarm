@@ -104,6 +104,14 @@ SELECTORS: dict[str, dict] = {
     "filters.owner_occupied": {"by": "label", "text": "Owner Occupied"},
     "filters.tax_delinquent": {"by": "label", "text": "Tax Delinquent"},
     "filters.equity_min": {"by": "label", "text": "Equity Min"},
+    # recipe-only filter keys (acquisition M3) — guessed like the rest;
+    # calibrate via --check + browser.yaml before first live recipe pull.
+    "filters.ownership_years_min": {"by": "label", "text": "Years of Ownership Min"},
+    "filters.improvement_max": {"by": "label", "text": "Improvement Value Max"},
+    "filters.property_class_option_commercial": {
+        "by": "role", "role": "option", "name": "Commercial Land"},
+    "filters.property_class_option_improved": {
+        "by": "role", "role": "option", "name": "Single Family Residential"},
     "filters.result_count": {"by": "testid", "id": "result-count"},
     "filters.apply": {"by": "role", "role": "button", "name": "Apply"},
     "filters.active_chip": {"by": "testid", "id": "active-filter-chip"},  # filters VERIFY gate

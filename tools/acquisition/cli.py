@@ -209,6 +209,50 @@ def _cmd_review(args, config) -> int:
     return 0
 
 
+def _cmd_pull(args, config) -> int:
+    from . import ledger as ledger_mod
+    from .pull.recipes import get_recipe, manual_checklist
+
+    try:
+        recipe = get_recipe(args.recipe)
+    except ValueError as exc:
+        print(f"[pull] {exc}")
+        return 1
+    if args.plan:
+        used = ledger_mod.quota_used()
+        print(manual_checklist(args.county, args.state, recipe))
+        print(f"\nquota: {used}/{config.quota_monthly} used this month "
+              f"({config.quota_monthly - used} remaining)")
+        return 0
+
+    from ..integrations.secrets import SecretError, get_secret
+
+    try:
+        username = get_secret("PROPSTREAM_USERNAME", required=True)
+        password = get_secret("PROPSTREAM_PASSWORD", required=True)
+    except SecretError as exc:
+        print(f"[pull] {exc}")
+        return 1
+
+    from ..browser.config import load_config as load_browser_config
+    from ..browser.driver import BrowserError
+    from ..browser.session import real_driver
+    from .pull.propstream import run_recipe_pull
+
+    browser_config = load_browser_config()
+    try:
+        with real_driver(browser_config) as driver:
+            report = run_recipe_pull(
+                driver, args.county, args.state, recipe_name=args.recipe,
+                config=config, browser_config=browser_config,
+                username=username, password=password)
+    except BrowserError as exc:
+        print(f"[pull] {exc}")
+        return 1
+    print(json.dumps(report, indent=2))
+    return 0 if report.get("inbox_file") else 1
+
+
 def _stub(milestone: str):
     def run(args, config) -> int:
         print(f"[acquire] this subcommand ships with {milestone} — not built yet")
@@ -280,9 +324,17 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--days", type=float, default=1.0, help="snooze: days")
     p.set_defaults(run=_cmd_review)
 
-    for name, milestone in (("pull", "M3"), ("counties", "M4")):
-        p = sub.add_parser(name)
-        p.set_defaults(run=_stub(milestone))
+    p = sub.add_parser("pull", help="Quota-tracked PropStream recipe pull "
+                                    "(browser; needs seeded session)")
+    p.add_argument("--county", required=True)
+    p.add_argument("--state", required=True)
+    p.add_argument("--recipe", default="vacant_land")
+    p.add_argument("--plan", action="store_true",
+                   help="print the recipe plan + quota headroom; no browser")
+    p.set_defaults(run=_cmd_pull)
+
+    p = sub.add_parser("counties")
+    p.set_defaults(run=_stub("M4"))
 
     args = parser.parse_args(argv)
     if args.check:
