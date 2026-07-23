@@ -129,9 +129,18 @@ def extract_reply(item: dict) -> dict | None:
 
 
 def fetch_replies(*, api_key: str, campaign_id: str, http_request=_http_request,
-                  page_size: int = 100, max_pages: int = 50) -> list[dict]:
-    """Every received reply in the campaign, oldest first. Fail-closed on auth."""
+                  page_size: int = 100, max_pages: int = 50,
+                  sleep=None) -> list[dict]:
+    """Every received reply in the campaign, oldest first. Fail-closed on auth.
 
+    Instantly rate-limits at 20 requests/minute: pages are spaced ~3.5 s
+    apart and a 429 backs off (20/40/60 s) before failing — seen live when
+    the reply pull followed other API calls in the same minute.
+    """
+
+    import time as _time
+
+    sleep = sleep or _time.sleep
     raw_items: list[dict] = []
     starting_after = None
     for _ in range(max_pages):
@@ -141,7 +150,12 @@ def fetch_replies(*, api_key: str, campaign_id: str, http_request=_http_request,
         if starting_after:
             params["starting_after"] = starting_after
         url = f"{EMAILS_URL}?{urllib.parse.urlencode(params)}"
-        status, body = http_request("GET", url, None, api_key)
+        for attempt in range(4):
+            status, body = http_request("GET", url, None, api_key)
+            if status != 429:
+                break
+            if attempt < 3:
+                sleep(20.0 * (attempt + 1))
         if status in (401, 403):
             raise RuntimeError(f"instantly auth failed listing emails (HTTP {status})")
         if not 200 <= status < 300:
@@ -152,6 +166,7 @@ def fetch_replies(*, api_key: str, campaign_id: str, http_request=_http_request,
         starting_after = data.get("next_starting_after")
         if not starting_after or not items:
             break
+        sleep(3.5)  # stay under 20 req/min across pages
 
     replies = [r for r in (extract_reply(i) for i in raw_items) if r]
     replies.sort(key=lambda r: r["ts"])

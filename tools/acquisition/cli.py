@@ -133,8 +133,14 @@ def _cmd_replies(args, config) -> int:
 
     conn = ledger_mod.connect()
     try:
-        r1 = ingest_mod.pull_and_ingest(api_key=api_key,
-                                        campaign_id=campaign_id, conn=conn)
+        try:
+            r1 = ingest_mod.pull_and_ingest(api_key=api_key,
+                                            campaign_id=campaign_id, conn=conn)
+        except RuntimeError as exc:
+            print(f"[replies] {exc}")
+            print("[replies] nothing ingested this run — re-run in a minute "
+                  "(Instantly rate limit) or check the API key")
+            return 1
         print(f"[replies] ingest: {json.dumps(r1)}")
         if llm is None:
             return 0
