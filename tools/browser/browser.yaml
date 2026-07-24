@@ -40,9 +40,11 @@ selectors:
   # --- inside the Filters panel (observed live 2026-07-24, stage-3 DOM) ---
   # The panel's own filter-name search: the robust way to reach any filter
   # section (the Min/Max input ids are random UUIDs — never target those).
+  # NOTE: the app REMOVES this input's placeholder attribute once it has a
+  # value (observed live), so anchor by the stable class-path fragment.
   filters.find:
-    by: placeholder
-    text: 'Find a Filter'
+    by: css
+    css: 'input[class*="earchFilterNew"]'
   # "View Properties" executes the filtered search — this is our apply.
   filters.apply:
     by: role

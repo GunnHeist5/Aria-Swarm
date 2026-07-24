@@ -100,6 +100,27 @@ class PlaywrightPageDriver:
     def current_url(self) -> str:
         return self.page.url
 
+    def type_keys(self, text: str, delay_ms: int = 40) -> None:
+        """Raw keyboard typing into whatever is focused — the escape hatch for
+        SPA inputs that re-render mid-interaction (their ids regenerate, which
+        detaches locators between the click and the fill)."""
+
+        self.page.keyboard.type(text, delay=delay_ms)
+
+    def click_text(self, text: str) -> None:
+        """Click the last visible element with this exact text (section
+        headings that aren't buttons; input VALUES are not text nodes, so a
+        find-box containing the same string never matches)."""
+
+        self.page.get_by_text(text, exact=True).last.click(timeout=4000)
+
+    def page_text(self, limit: int = 1500) -> str:
+        try:
+            return " ".join(
+                (self.page.inner_text("body", timeout=3000) or "").split())[:limit]
+        except Exception:  # noqa: BLE001
+            return ""
+
     def force_fill(self, key: str, text: str) -> None:
         """fill() with a keyboard fallback: SPA dropdowns/overlays can make
         the strict actionability wait time out even though the element is

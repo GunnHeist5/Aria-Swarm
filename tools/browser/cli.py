@@ -157,9 +157,11 @@ def _run_check(config, args) -> int:
                         pass
                 fill = getattr(driver, "force_fill", driver.fill)
                 try:
+                    # the box re-renders on focus (session-generated ids), so
+                    # click it and type via raw keyboard, no locator re-use
                     driver.click("search.box")
-                    fill("search.box", f"{args.county.title()} County, "
-                                       f"{args.state.upper()}")
+                    getattr(driver, "type_keys", lambda t: None)(
+                        f"{args.county.title()} County, {args.state.upper()}")
                     driver.is_present("search.suggestion", timeout_ms=5000)
                     report["dom_after_search"] = \
                         getattr(driver, "dom_inventory", list)(60)
@@ -182,22 +184,37 @@ def _run_check(config, args) -> int:
                 # chips. Read-only; the find box is cleared between probes.
                 if driver.is_present("filters.find", timeout_ms=2000):
                     report["filter_probes"] = {}
-                    for term in ("Property Type", "Property Class",
-                                 "Lot Size", "Ownership", "Owner Occupied",
-                                 "Improvement", "Equity", "Tax"):
+                    for term in ("Property Type", "Lot Size", "Ownership",
+                                 "Owner Occupied", "Improvement", "Equity",
+                                 "Tax"):
+                        probe: dict = {}
                         try:
                             fill("filters.find", term)
                             driver.is_present("filters.apply", timeout_ms=1500)
-                            report["filter_probes"][term] = \
-                                getattr(driver, "dom_inventory", list)(45)
+                            # expand the matched section (headings aren't
+                            # buttons; the find-box VALUE never matches text)
+                            try:
+                                getattr(driver, "click_text",
+                                        lambda t: None)(term)
+                                driver.is_present("filters.apply",
+                                                  timeout_ms=1200)
+                            except Exception:  # noqa: BLE001
+                                pass
+                            probe["text"] = getattr(driver, "page_text",
+                                                    lambda *_: "")(1400)
+                            probe["els"] = [
+                                e for e in
+                                getattr(driver, "dom_inventory", list)(60)
+                                if e.get("text") or e.get("placeholder")]
                             driver.screenshot(
                                 "calib-stage4-" + term.lower().replace(" ", "-"))
                         except Exception as exc:  # noqa: BLE001
-                            report["filter_probes"][term] = [{"error": str(exc)}]
-                    try:
-                        fill("filters.find", "")
-                    except Exception:  # noqa: BLE001
-                        pass
+                            probe["error"] = str(exc)
+                        report["filter_probes"][term] = probe
+                        try:
+                            fill("filters.find", "")
+                        except Exception:  # noqa: BLE001
+                            pass
     except Exception as exc:  # noqa: BLE001
         print(f"calibration could not launch a browser: {exc}", file=sys.stderr)
         return 1
@@ -226,12 +243,13 @@ def _run_check(config, args) -> int:
         if report.get(section):
             print(label)
             _print_els(report[section])
-    for term, els in (report.get("filter_probes") or {}).items():
-        # only the informative elements: texts and labeled inputs, skipping
-        # the constant sidebar/map chrome
+    for term, probe in (report.get("filter_probes") or {}).items():
         print(f"FILTER PROBE {term!r}:")
-        _print_els([e for e in els
-                    if e.get("text") or e.get("placeholder") or e.get("error")])
+        if probe.get("error"):
+            print(f"  error: {probe['error']}")
+            continue
+        print(f"  panel text: {probe.get('text', '')}")
+        _print_els(probe.get("els") or [])
     print(render_report(report))
     print("screenshots under:", config.artifact_dir)
     print(json.dumps(report))
