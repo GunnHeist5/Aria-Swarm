@@ -287,6 +287,43 @@ def test_counter_between_open_and_mao_is_allowed():
     assert draft_mod.dollars_in("I can do $18.5k today") == [18500.0]
 
 
+def test_wrong_person_never_gets_a_draft(tmp_path):
+    _env_db(tmp_path)
+    _seed_lead(verdict="NEGOTIATE", mao=20000, open_at=17000, walk_at=25000,
+               retail_estimate=40000)
+    conn = ledger.connect()
+    ingest_mod.ingest_reply(_reply(text="Was already sold"), conn=conn)
+    _through_verify(conn, _LLM('{"classification": "wrong_person", '
+                               '"price_mentioned": null, "summary": "sold"}'))
+    report = draft_mod.draft_verified(conn=conn,
+                                      llm=_LLM("SHOULD NEVER BE CALLED"),
+                                      log=lambda *_: None)
+    item = conn.execute("SELECT state, reason, draft FROM review_queue").fetchone()
+    conn.close()
+    assert report.get("not_draftable") == 1
+    assert item["state"] == "needs_manual" and item["draft"] is None
+    assert "wrong_person" in item["reason"]
+
+
+def test_reply_from_third_export_email_matches(tmp_path):
+    _env_db(tmp_path)
+    ledger.ingest_rows([{
+        "APN": "777", "County": "Harris", "State": "TX",
+        "Address": "2 Land Rd", "City": "Houston", "Zip": "77028",
+        "Email 1": "primary@x.com", "Email 2": "second@x.com",
+        "Email 3": "personal@gmail.com", "Lot Size Sqft": "21780",
+    }], source_list="t", mark_enrolled=True)
+    conn = ledger.connect()
+    state = ingest_mod.ingest_reply(
+        _reply(id="em-3", email="personal@gmail.com"), conn=conn)
+    item = conn.execute("SELECT apn FROM review_queue").fetchone()
+    conn.close()
+    assert state == "new" and item["apn"] == "777"
+    # and a STOP from that address flips the lead too
+    assert ledger.suppress_value("email", "personal@gmail.com",
+                                 reason="STOP") == 1
+
+
 # ---------------------------------------------------------------------------
 # review queue
 # ---------------------------------------------------------------------------

@@ -126,6 +126,9 @@ _SCHEMA = (
 _MIGRATIONS = (
     "ALTER TABLE leads ADD COLUMN retail_estimate REAL",
     "ALTER TABLE leads ADD COLUMN evidence TEXT",
+    # every export email (JSON list) — sellers reply from any of them; seen
+    # live when replies from Email 3/4 addresses failed to match the ledger
+    "ALTER TABLE leads ADD COLUMN emails TEXT",
 )
 
 
@@ -190,13 +193,13 @@ def _phones(row: dict) -> str:
     return json.dumps(out)
 
 
-def _emails(row: dict) -> tuple[str | None, str | None]:
+def _emails(row: dict) -> list[str]:
     found = []
     for col in ("Email 1", "Email 2", "Email 3", "Email 4"):
         value = (row.get(col) or "").strip().lower()
         if value and "@" in value and value not in found:
             found.append(value)
-    return (found[0] if found else None, found[1] if len(found) > 1 else None)
+    return found
 
 
 def _lot_sqft(row: dict) -> float | None:
@@ -238,24 +241,26 @@ def ingest_rows(rows: list[dict], *, source_list: str,
             if not ckey or not apn:
                 report["no_key"] += 1
                 continue
-            email, email2 = _emails(row)
+            all_emails = _emails(row)
+            email = all_emails[0] if all_emails else None
+            email2 = all_emails[1] if len(all_emails) > 1 else None
             status = "enrolled" if (mark_enrolled and email) else "new"
             history = json.dumps([{"at": now, "from": None, "to": status,
                                    "note": f"ingest:{source_list}"}])
             cur = conn.execute(
                 """INSERT OR IGNORE INTO leads
                    (county_key, apn, county_name, state, owner_name,
-                    first_name, last_name, email, email2, phones,
+                    first_name, last_name, email, email2, emails, phones,
                     address, city, zip, lot_sqft, est_value, source_list,
                     status, status_history, created_at, updated_at)
-                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                 (ckey, apn,
                  (row.get("County") or "").strip() or None,
                  (row.get("State") or "").strip() or None,
                  (row.get("Owner 1 Name") or row.get("Owner Name") or "").strip() or None,
                  (row.get("Owner 1 First Name") or "").strip() or None,
                  (row.get("Owner 1 Last Name") or "").strip() or None,
-                 email, email2, _phones(row),
+                 email, email2, json.dumps(all_emails), _phones(row),
                  (row.get("Address") or "").strip() or None,
                  (row.get("City") or "").strip() or None,
                  (row.get("Zip") or "").strip() or None,
@@ -366,8 +371,9 @@ def suppress_value(kind: str, value: str, *, reason: str = "manual",
             "VALUES (?,?,?,?)", (kind, value, reason, _stamp()))
         if kind == "email":
             hits = conn.execute(
-                "SELECT county_key, apn FROM leads WHERE lower(email)=? OR lower(email2)=?",
-                (value, value)).fetchall()
+                "SELECT county_key, apn FROM leads WHERE lower(email)=? "
+                "OR lower(email2)=? OR emails LIKE ?",
+                (value, value, f'%"{value}"%')).fetchall()
         elif kind == "apn":
             hits = conn.execute(
                 "SELECT county_key, apn FROM leads WHERE apn=?", (value.upper(),)).fetchall()

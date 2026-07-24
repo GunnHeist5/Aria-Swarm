@@ -27,9 +27,13 @@ def match_lead(lead_email: str,
     email = (lead_email or "").strip().lower()
     if not email:
         return None, []
+    # email/email2 cover pre-migration rows; the emails JSON column carries
+    # ALL export emails (sellers reply from any of them). The quoted LIKE
+    # pattern matches the JSON-encoded string exactly, not substrings.
     rows = conn.execute(
         "SELECT * FROM leads WHERE lower(email)=? OR lower(email2)=? "
-        "ORDER BY county_key, apn", (email, email)).fetchall()
+        "OR emails LIKE ? ORDER BY county_key, apn",
+        (email, email, f'%"{email}"%')).fetchall()
     if not rows:
         return None, []
     primary = next((r for r in rows if r["verdict"]), rows[0])

@@ -36,6 +36,12 @@ _FOOTER_MARK = "── approval guide ──"
 
 _DOLLAR_RE = re.compile(r"\$\s?([\d][\d,]*(?:\.\d+)?)\s?([kK])?")
 
+# Classifications that warrant a drafted response at all. wrong_person /
+# listed_with_agent / hostile must never get "I'll have an offer by Saturday"
+# — they route to the human with the classification as the reason.
+DRAFTABLE = ("interested_no_price", "price_given", "question",
+             "multi_lot_disclosure")
+
 
 def load_playbook() -> str:
     path = Path(__file__).resolve().parents[1] / "playbook.md"
@@ -165,6 +171,15 @@ def draft_verified(*, conn: sqlite3.Connection, llm, log=print) -> dict:
         "SELECT * FROM review_queue WHERE state='verified' ORDER BY ts").fetchall()
     report = {"drafted": 0, "holding": 0, "guard_rejected": 0}
     for item in items:
+        if item["classification"] not in DRAFTABLE:
+            conn.execute(
+                "UPDATE review_queue SET state='needs_manual', reason=?, "
+                "updated_at=? WHERE id=?",
+                (f"{item['classification']}: human decision, no auto-draft",
+                 ledger._stamp(), item["id"]))
+            conn.commit()
+            report["not_draftable"] = report.get("not_draftable", 0) + 1
+            continue
         verification = json.loads(item["verification"] or "{}")
         lead = conn.execute(
             "SELECT * FROM leads WHERE county_key=? AND apn=?",
