@@ -133,6 +133,53 @@ class PlaywrightPageDriver:
 
         self.page.get_by_text(text, exact=True).last.click(timeout=4000)
 
+    def click_after_heading(self, heading: str, target: str) -> None:
+        """Click the FIRST ``target`` element that follows ``heading`` in
+        document order — disambiguates repeated labels (e.g. the 'Vacant
+        Land' classification chip vs the 'Vacant Land' Lead-List row) by
+        anchoring on the section heading."""
+
+        anchor = self.page.get_by_text(heading, exact=True).last
+        anchor.locator(
+            f"xpath=following::*[normalize-space(text())='{target}']"
+            "[1]").click(timeout=4000)
+
+    def results_recon(self) -> dict:
+        """Targeted results-view snapshot: the count text + only the
+        action-relevant controls (buttons, checkboxes), not the whole DOM —
+        keeps the calibration output small."""
+
+        out = {"count_text": "", "buttons": [], "checkbox_like": []}
+        try:
+            out["count_text"] = " ".join(
+                (self.page.inner_text("body", timeout=3000) or "").split())
+            # keep only the segment likely to hold the result count
+            for marker in ("Results", "results", "Properties", "selected"):
+                i = out["count_text"].find(marker)
+                if i != -1:
+                    out["count_text"] = out["count_text"][max(0, i - 40):i + 40]
+                    break
+        except Exception:  # noqa: BLE001
+            pass
+        try:
+            for b in self.page.get_by_role("button").all()[:60]:
+                t = (b.inner_text(timeout=800) or "").strip()
+                if t and t not in out["buttons"]:
+                    out["buttons"].append(t[:40])
+        except Exception:  # noqa: BLE001
+            pass
+        try:
+            out["checkbox_like"] = self.page.evaluate(
+                """() => [...document.querySelectorAll(
+                     'input[type=checkbox], [role=checkbox], th input, td input')]
+                   .filter(e => e.offsetParent !== null)
+                   .slice(0, 8)
+                   .map(e => ({tag: e.tagName.toLowerCase(),
+                               cls: (e.className||'').toString().slice(0,50)}))""")
+        except Exception:  # noqa: BLE001
+            pass
+        return out
+
     def page_text(self, limit: int = 1500) -> str:
         try:
             return " ".join(

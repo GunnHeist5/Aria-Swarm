@@ -90,7 +90,7 @@ def main(argv: list[str] | None = None) -> int:
 def _run_check(config, args) -> int:
     """Calibration sweep — drives the real logged-in page, maps every selector."""
 
-    from .calibrate import calibrate, render_report
+    from .calibrate import calibrate
     from .session import real_driver
 
     if not args.county:
@@ -155,102 +155,76 @@ def _run_check(config, args) -> int:
                         driver.click("consent.accept")
                     except Exception:  # noqa: BLE001
                         pass
-                fill = getattr(driver, "force_fill", driver.fill)
                 try:
                     # the box re-renders on focus (session-generated ids), so
                     # click it and type via raw keyboard, no locator re-use
                     driver.click("search.box")
                     getattr(driver, "type_keys", lambda t: None)(
                         f"{args.county.title()} County, {args.state.upper()}")
-                    driver.is_present("search.suggestion", timeout_ms=5000)
-                    report["dom_after_search"] = \
-                        getattr(driver, "dom_inventory", list)(60)
-                    driver.screenshot("calib-stage2-search-typed")
+                    driver.is_present("filters.open", timeout_ms=3000)
+                    report["search_typed"] = True
                 except Exception as exc:  # noqa: BLE001
-                    report["dom_after_search"] = [{"error": str(exc)}]
-                # Stage 3: open the Filters panel and inventory it — the
-                # whole filter selector set lives in there.
+                    report["search_typed"] = f"FAILED: {exc}"
+                # Open the Filters panel (selectors already calibrated).
                 try:
                     if driver.is_present("filters.open", timeout_ms=3000):
                         driver.click("filters.open")
                         driver.is_present("filters.find", timeout_ms=4000)
-                        report["dom_filters"] = \
-                            getattr(driver, "dom_inventory", list)(90)
-                        driver.screenshot("calib-stage3-filters-open")
+                        report["filters_opened"] = True
                 except Exception as exc:  # noqa: BLE001
-                    report["dom_filters"] = [{"error": str(exc)}]
-                # Stage 4: probe Find-a-Filter with each term the recipes
-                # need — reveals every filter section's real name + option
-                # chips. Read-only; the find box is cleared between probes.
-                # Stage 4: full panel text (section labels below the fold)
-                if driver.is_present("filters.find", timeout_ms=2000):
-                    report["panel_text_full"] = getattr(
-                        driver, "page_text", lambda *_: "")(5000)
+                    report["filters_opened"] = f"FAILED: {exc}"
                 # Stage 5: the vacant-land dry search — click the Vacant Land
-                # classification chip, View Properties, and inventory the
-                # RESULTS view (count / select-all / export live there).
+                # classification CHIP (scoped under its heading, not the
+                # Lead-List row of the same name), View Properties, and
+                # inventory the RESULTS view (count / select-all / export).
                 # Read-only: nothing is saved, skip-traced, or exported.
                 try:
-                    getattr(driver, "click_text", lambda t: None)("Vacant Land")
+                    getattr(driver, "click_after_heading",
+                            lambda *a: None)("Property Classification(s)",
+                                             "Vacant Land")
                     driver.is_present("filters.apply", timeout_ms=1500)
                     getattr(driver, "fill_labeled_range",
-                            lambda *a, **k: None)("Lot Size (SqFt)",
-                                                  5000, None)
+                            lambda *a, **k: None)("Lot Size (SqFt)", 5000, None)
+                    driver.screenshot("calib-stage5a-filters-set")
                     driver.click("filters.apply")   # "View Properties"
-                    driver.is_present("results.select_all", timeout_ms=8000)
-                    report["results_page"] = {
-                        "page": getattr(driver, "page_summary", dict)(),
-                        "els": [e for e in
-                                getattr(driver, "dom_inventory", list)(70)
-                                if e.get("text") or e.get("placeholder")
-                                or e.get("aria")],
-                    }
-                    driver.screenshot("calib-stage5-results")
+                    driver.is_present("results.select_all", timeout_ms=9000) \
+                        or driver.is_present("app.ready", timeout_ms=3000)
+                    report["results_recon"] = getattr(
+                        driver, "results_recon", dict)()
+                    driver.screenshot("calib-stage5b-results")
                 except Exception as exc:  # noqa: BLE001
-                    report["results_page"] = {"error": str(exc)}
+                    report["results_recon"] = {"error": str(exc)}
     except Exception as exc:  # noqa: BLE001
         print(f"calibration could not launch a browser: {exc}", file=sys.stderr)
         return 1
     import json
+    import os
 
-    if report.get("page"):
-        print(f"PAGE url   : {report['page'].get('url')}")
-        print(f"PAGE title : {report['page'].get('title')}")
-        print(f"PAGE text  : {report['page'].get('text', '')[:300]}")
-    if report.get("dom"):
-        print("DOM INVENTORY (visible elements — selector raw material):")
-        for el in report["dom"]:
-            attrs = " ".join(f"{k}={v!r}" for k, v in el.items()
-                             if v and k != "tag")
-            print(f"  <{el['tag']}> {attrs}")
-    def _print_els(els):
-        for el in els:
-            attrs = " ".join(f"{k}={v!r}" for k, v in el.items()
-                             if v and k != "tag")
-            print(f"  <{el.get('tag', '?')}> {attrs}")
+    # Full report -> file on the VPS (keeps the pasted-back output small).
+    art = os.path.expanduser(config.artifact_dir)
+    os.makedirs(art, exist_ok=True)
+    report_path = os.path.join(art, "calib_report.json")
+    try:
+        with open(report_path, "w", encoding="utf-8") as fh:
+            json.dump(report, fh, indent=2)
+    except Exception:  # noqa: BLE001
+        report_path = "(could not write)"
 
-    for section, label in (("dom_after_search",
-                            "DOM AFTER TYPING COUNTY (suggestions):"),
-                           ("dom_filters",
-                            "DOM WITH FILTERS PANEL OPEN:")):
-        if report.get(section):
-            print(label)
-            _print_els(report[section])
-    if report.get("panel_text_full"):
-        print(f"FULL PANEL TEXT: {report['panel_text_full']}")
-    results = report.get("results_page") or {}
-    if results:
-        print("RESULTS PAGE (after Vacant Land + View Properties):")
-        if results.get("error"):
-            print(f"  error: {results['error']}")
-        else:
-            page = results.get("page") or {}
-            print(f"  url: {page.get('url')}")
-            print(f"  text: {page.get('text', '')}")
-            _print_els(results.get("els") or [])
-    print(render_report(report))
-    print("screenshots under:", config.artifact_dir)
-    print(json.dumps(report))
+    # Compact stdout: progress flags + the RESULTS recon (the only new data).
+    print("=== calibration summary ===")
+    print(f"login          : {report.get('login', 'reused session')}")
+    print(f"page           : {(report.get('page') or {}).get('url')}")
+    print(f"search typed   : {report.get('search_typed')}")
+    print(f"filters opened : {report.get('filters_opened')}")
+    rr = report.get("results_recon") or {}
+    if rr.get("error"):
+        print(f"results recon  : ERROR {rr['error']}")
+    else:
+        print(f"results count  : {rr.get('count_text', '')!r}")
+        print(f"results buttons: {rr.get('buttons')}")
+        print(f"checkbox-like  : {rr.get('checkbox_like')}")
+    print(f"\nfull report    : {report_path}")
+    print("screenshots    :", config.artifact_dir)
     return 0 if report["ok"] else 1
 
 
