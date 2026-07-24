@@ -71,6 +71,20 @@ def verify_lead(county: str, apn: str, *,
         return {"verified": False, "reason": f"no such lead {county}/{apn}",
                 "confidence": None, "offer_box": None, "evidence": None}
 
+    # Out-of-fee-model cap: never auto-price a lead above max_asset_value —
+    # no offer box, no holding promise. LOW_PRIORITY, human decision.
+    for raw in (row["retail_estimate"], row["est_value"]):
+        try:
+            value = float(str(raw).replace(",", "").replace("$", ""))
+        except (TypeError, ValueError):
+            continue
+        if value > config.max_asset_value:
+            return {"verified": False, "low_priority": True,
+                    "reason": f"asset value ${value:,.0f} exceeds "
+                              f"max_asset_value ${config.max_asset_value:,.0f} "
+                              "— out of fee model, LOW_PRIORITY, human only",
+                    "confidence": None, "offer_box": None, "evidence": None}
+
     def _assess(r: sqlite3.Row) -> tuple[bool, str]:
         if not r["verdict"] or r["verdict"] == "PASS":
             return False, "no usable enrichment verdict"

@@ -43,6 +43,14 @@ class AcquisitionConfig:
     # someone mid-deal.
     enrollable_statuses: tuple[str, ...] = ("new", "screened", "traced")
 
+    # Leads whose asset value exceeds this are OUT OF THE FEE MODEL: never
+    # auto-priced (no offer box, no holding promise), deprioritized in
+    # enrollment ordering, routed to the human as LOW_PRIORITY.
+    max_asset_value: float = 500_000.0
+
+    # --- offer aging (reply agent drafts bump check-ins at these ages) ----
+    bump_days: tuple[int, ...] = (7, 21)
+
     # --- browser pacing (M3; humans don't click every 100 ms) ------------
     action_delay_min_s: float = 2.0
     action_delay_max_s: float = 5.0
@@ -74,7 +82,7 @@ def load_config(path: str | None = None) -> AcquisitionConfig:
     unknown = set(overlay) - known
     if unknown:
         raise ValueError(f"unknown config keys: {sorted(unknown)}")
-    for key in ("eligible_verdicts", "enrollable_statuses"):
+    for key in ("eligible_verdicts", "enrollable_statuses", "bump_days"):
         if key in overlay and isinstance(overlay[key], list):
             overlay[key] = tuple(overlay[key])
     return DEFAULT_CONFIG.mutate(**overlay)

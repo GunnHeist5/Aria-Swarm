@@ -163,7 +163,9 @@ def strip_approval_footer(draft: str) -> str:
     return draft[:idx].rstrip() if idx != -1 else draft
 
 
-def draft_verified(*, conn: sqlite3.Connection, llm, log=print) -> dict:
+def draft_verified(*, conn: sqlite3.Connection, llm,
+                   config: AcquisitionConfig = DEFAULT_CONFIG,
+                   log=print) -> dict:
     """Draft every ``verified`` queue item -> ``pending_review``."""
 
     ledger.init_db(conn)
@@ -171,6 +173,18 @@ def draft_verified(*, conn: sqlite3.Connection, llm, log=print) -> dict:
         "SELECT * FROM review_queue WHERE state='verified' ORDER BY ts").fetchall()
     report = {"drafted": 0, "holding": 0, "guard_rejected": 0}
     for item in items:
+        # fee-model cap applies to the SELLER'S named price too — a $900k ask
+        # is out of the model even when the county's assessed value is low
+        if (item["price_mentioned"] or 0) > config.max_asset_value:
+            conn.execute(
+                "UPDATE review_queue SET state='needs_manual', reason=?, "
+                "updated_at=? WHERE id=?",
+                (f"seller price ${item['price_mentioned']:,.0f} exceeds "
+                 f"max_asset_value ${config.max_asset_value:,.0f} — "
+                 "LOW_PRIORITY, human only", ledger._stamp(), item["id"]))
+            conn.commit()
+            report["low_priority"] = report.get("low_priority", 0) + 1
+            continue
         if item["classification"] not in DRAFTABLE:
             conn.execute(
                 "UPDATE review_queue SET state='needs_manual', reason=?, "
@@ -184,6 +198,18 @@ def draft_verified(*, conn: sqlite3.Connection, llm, log=print) -> dict:
         lead = conn.execute(
             "SELECT * FROM leads WHERE county_key=? AND apn=?",
             (item["county_key"], item["apn"])).fetchone()
+
+        if verification.get("low_priority"):
+            # Above the fee-model cap: no holding promise either — a "firm
+            # offer by Saturday" we don't intend to price would be a lie.
+            conn.execute(
+                "UPDATE review_queue SET state='needs_manual', reason=?, "
+                "updated_at=? WHERE id=?",
+                (verification.get("reason", "LOW_PRIORITY"),
+                 ledger._stamp(), item["id"]))
+            conn.commit()
+            report["low_priority"] = report.get("low_priority", 0) + 1
+            continue
 
         if not verification.get("verified") or lead is None:
             result = holding_draft(

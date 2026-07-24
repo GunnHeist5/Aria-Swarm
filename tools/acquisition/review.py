@@ -82,7 +82,9 @@ def approve(item_id: str, *, send: bool, api_key: str = "",
         if subject and not subject.lower().startswith("re:"):
             subject = f"Re: {subject}"
         payload = {
-            "reply_to_uuid": item["id"],
+            # synthetic items (offer bumps) thread under the seller's last
+            # real email via reply_to; reply items ARE that email (their id)
+            "reply_to_uuid": item["reply_to"] or item["id"],
             "eaccount": item["eaccount"],
             "subject": subject,
             "body": {"text": body_text},
@@ -103,7 +105,8 @@ def approve(item_id: str, *, send: bool, api_key: str = "",
             "WHERE id=?",
             ((edited_text or item["draft"]), ledger._stamp(), item_id))
         conn.commit()
-        if item["county_key"] and item["apn"]:
+        if item["county_key"] and item["apn"] and item["draft_kind"] != "bump":
+            # bumps never move status — the lead stays offer_out
             new_status = "offer_out" if item["draft_kind"] == "offer" \
                 else "negotiating"
             ledger.set_status(item["county_key"], item["apn"], new_status,

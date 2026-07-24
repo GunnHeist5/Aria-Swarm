@@ -129,6 +129,11 @@ _MIGRATIONS = (
     # every export email (JSON list) — sellers reply from any of them; seen
     # live when replies from Email 3/4 addresses failed to match the ledger
     "ALTER TABLE leads ADD COLUMN emails TEXT",
+    # the human's live offer on offer_out leads (bump drafts restate it)
+    "ALTER TABLE leads ADD COLUMN offer_amount REAL",
+    # review_queue: synthetic items (offer bumps) thread under the seller's
+    # LAST email, whose Instantly id differs from the queue item's own id
+    "ALTER TABLE review_queue ADD COLUMN reply_to TEXT",
 )
 
 
@@ -284,9 +289,16 @@ def ingest_rows(rows: list[dict], *, source_list: str,
 
 
 def set_status(county: str, apn: str, status: str, *, note: str | None = None,
+               at: str | None = None,
                conn: sqlite3.Connection | None = None) -> None:
+    """``at`` (YYYY-MM-DD [HH:MM:SS]) backdates the transition — used when a
+    human records an offer that actually went out days ago, so aging math
+    (offer bumps) runs from the real date, not the data-entry date."""
+
     if status not in STATUSES:
         raise LedgerError(f"unknown status {status!r} (must be one of {STATUSES})")
+    if at and len(at) == 10:
+        at = f"{at} 00:00:00"
     own = conn is None
     conn = conn or connect()
     try:
@@ -296,7 +308,7 @@ def set_status(county: str, apn: str, status: str, *, note: str | None = None,
         if row is None:
             raise LedgerError(f"no such lead: {county}/{apn}")
         history = json.loads(row["status_history"] or "[]")
-        history.append({"at": _stamp(), "from": row["status"], "to": status,
+        history.append({"at": at or _stamp(), "from": row["status"], "to": status,
                         "note": note})
         conn.execute(
             "UPDATE leads SET status=?, status_history=?, updated_at=? "
@@ -337,6 +349,84 @@ def write_enrichment(county: str, apn: str, *, verdict: str,
             conn.close()
     new_status = "killed" if verdict == "PASS" else "screened"
     set_status(county, apn, new_status, note=f"enrich:{source}")
+
+
+def find_leads(*, email: str | None = None, address: str | None = None,
+               conn: sqlite3.Connection | None = None) -> list[sqlite3.Row]:
+    """Human-friendly lead lookup for `acquire ledger set` — by any export
+    email (exact) or by address substring (case-insensitive)."""
+
+    own = conn is None
+    conn = conn or connect()
+    try:
+        init_db(conn)
+        if email:
+            e = email.strip().lower()
+            return conn.execute(
+                "SELECT * FROM leads WHERE lower(email)=? OR lower(email2)=? "
+                "OR emails LIKE ? ORDER BY county_key, apn",
+                (e, e, f'%"{e}"%')).fetchall()
+        if address:
+            return conn.execute(
+                "SELECT * FROM leads WHERE lower(address) LIKE ? "
+                "ORDER BY county_key, apn",
+                (f"%{address.strip().lower()}%",)).fetchall()
+        return []
+    finally:
+        if own:
+            conn.close()
+
+
+def ensure_lead(county: str, apn: str, *, status: str = "new",
+                note: str | None = None, email: str | None = None,
+                conn: sqlite3.Connection | None = None) -> bool:
+    """Create a minimal human-entered lead row if absent (True if created).
+
+    For deals worked before the ledger existed: a stub carries the key, the
+    human-set status, and optionally an email so replies match. Source is
+    marked ``manual`` — later export ingests never overwrite it (first wins).
+    """
+
+    if status not in STATUSES:
+        raise LedgerError(f"unknown status {status!r}")
+    own = conn is None
+    conn = conn or connect()
+    try:
+        init_db(conn)
+        now = _stamp()
+        state = county.rsplit("_", 1)[-1].upper() if "_" in county else None
+        history = json.dumps([{"at": now, "from": None, "to": status,
+                               "note": note or "manual stub"}])
+        cur = conn.execute(
+            """INSERT OR IGNORE INTO leads
+               (county_key, apn, state, email, emails, phones, source_list,
+                status, status_history, notes, created_at, updated_at)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
+            (county, apn, state, (email or "").lower() or None,
+             json.dumps([email.lower()] if email else []), "[]", "manual",
+             status, history, note, now, now))
+        conn.commit()
+        return bool(cur.rowcount)
+    finally:
+        if own:
+            conn.close()
+
+
+def set_offer_amount(county: str, apn: str, amount: float | None,
+                     conn: sqlite3.Connection | None = None) -> None:
+    own = conn is None
+    conn = conn or connect()
+    try:
+        init_db(conn)
+        cur = conn.execute(
+            "UPDATE leads SET offer_amount=?, updated_at=? "
+            "WHERE county_key=? AND apn=?", (amount, _stamp(), county, apn))
+        if not cur.rowcount:
+            raise LedgerError(f"no such lead: {county}/{apn}")
+        conn.commit()
+    finally:
+        if own:
+            conn.close()
 
 
 # ---------------------------------------------------------------------------

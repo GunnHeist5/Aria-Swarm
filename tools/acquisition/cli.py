@@ -142,6 +142,12 @@ def _cmd_replies(args, config) -> int:
                   "(Instantly rate limit) or check the API key")
             return 1
         print(f"[replies] ingest: {json.dumps(r1)}")
+
+        from .reply import bumps as bumps_mod
+
+        rb = bumps_mod.queue_bumps(config=config, conn=conn)
+        print(f"[replies] bumps: {json.dumps({k: v for k, v in rb.items() if k != 'due'})}")
+
         if llm is None:
             return 0
 
@@ -154,7 +160,7 @@ def _cmd_replies(args, config) -> int:
         print(f"[replies] classify: {json.dumps(r2)}")
         r3 = verify_mod.verify_classified(config=config, conn=conn)
         print(f"[replies] verify: {json.dumps(r3)}")
-        r4 = draft_mod.draft_verified(conn=conn, llm=llm)
+        r4 = draft_mod.draft_verified(conn=conn, llm=llm, config=config)
         print(f"[replies] draft: {json.dumps(r4)}")
         n = len([1 for _ in conn.execute(
             "SELECT 1 FROM review_queue WHERE state='pending_review'")])
@@ -257,6 +263,76 @@ def _cmd_pull(args, config) -> int:
         return 1
     print(json.dumps(report, indent=2))
     return 0 if report.get("inbox_file") else 1
+
+
+def _cmd_ledger(args, config) -> int:
+    """`acquire ledger set STATUS ...` — human truth overrides everything."""
+
+    from . import ledger as ledger_mod
+
+    if args.action != "set":
+        print("[ledger] only 'set' is supported")
+        return 1
+
+    conn = ledger_mod.connect()
+    try:
+        # resolve the lead: explicit key > email > address
+        if args.county and args.apn:
+            county, apn = args.county, args.apn.upper()
+            row = conn.execute(
+                "SELECT * FROM leads WHERE county_key=? AND apn=?",
+                (county, apn)).fetchone()
+            if row is None:
+                ledger_mod.ensure_lead(county, apn, status=args.status,
+                                       note=args.note, email=args.email,
+                                       conn=conn)
+                print(f"[ledger] created manual stub {county}/{apn} "
+                      f"-> {args.status}")
+                if args.offer is not None:
+                    ledger_mod.set_offer_amount(county, apn, args.offer,
+                                                conn=conn)
+                if args.suppress and args.email:
+                    ledger_mod.suppress_value("email", args.email,
+                                              reason="manual", conn=conn)
+                return 0
+        else:
+            matches = ledger_mod.find_leads(email=args.email,
+                                            address=args.address, conn=conn)
+            if not matches:
+                print("[ledger] no lead matches — backfill the export first, "
+                      "or pass --county and --apn to create a manual stub")
+                return 1
+            if len(matches) > 1:
+                print(f"[ledger] {len(matches)} leads match — disambiguate "
+                      "with --county/--apn:")
+                for m in matches:
+                    print(f"  {m['county_key']}/{m['apn']}  "
+                          f"{m['address'] or '?'}  status={m['status']}")
+                return 1
+            row = matches[0]
+            county, apn = row["county_key"], row["apn"]
+
+        ledger_mod.set_status(county, apn, args.status, note=args.note,
+                              at=args.offered_on, conn=conn)
+        if args.offer is not None:
+            ledger_mod.set_offer_amount(county, apn, args.offer, conn=conn)
+        suppressed = 0
+        if args.suppress:
+            for e in ([args.email] if args.email else
+                      [row["email"], row["email2"]]):
+                if e:
+                    suppressed += ledger_mod.suppress_value(
+                        "email", e, reason="manual", conn=conn)
+        extra = (f" offer=${args.offer:,.0f}" if args.offer else "") + \
+            (f" (suppressed {suppressed})" if args.suppress else "") + \
+            (f" as-of {args.offered_on}" if args.offered_on else "")
+        print(f"[ledger] {county}/{apn} -> {args.status}{extra}")
+        return 0
+    except ledger_mod.LedgerError as exc:
+        print(f"[ledger] {exc}")
+        return 1
+    finally:
+        conn.close()
 
 
 def _cmd_counties(args, config) -> int:
@@ -391,6 +467,24 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--reason", choices=ledger.SUPPRESSION_REASONS,
                    default="manual")
     p.set_defaults(run=_cmd_suppress)
+
+    p = sub.add_parser("ledger", help="Human-authoritative ledger edits")
+    p.add_argument("action", choices=("set",))
+    p.add_argument("status", choices=ledger.STATUSES)
+    p.add_argument("--county", default=None, help="county key, e.g. harris_tx")
+    p.add_argument("--apn", default=None)
+    p.add_argument("--email", default=None,
+                   help="find the lead by any of its export emails")
+    p.add_argument("--address", default=None,
+                   help="find the lead by address substring")
+    p.add_argument("--note", default=None)
+    p.add_argument("--offer", type=float, default=None,
+                   help="record the live offer amount (bumps restate it)")
+    p.add_argument("--offered-on", default=None, metavar="YYYY-MM-DD",
+                   help="backdate the transition so offer aging is correct")
+    p.add_argument("--suppress", action="store_true",
+                   help="also suppress the lead's email(s)")
+    p.set_defaults(run=_cmd_ledger)
 
     p = sub.add_parser("mark", help="Set a lead's status (e.g. negotiating)")
     p.add_argument("county", help="county key, e.g. harris_tx")

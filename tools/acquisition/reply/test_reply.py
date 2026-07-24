@@ -403,6 +403,111 @@ def test_reject_and_snooze(tmp_path):
     assert state == "rejected"
 
 
+# ---------------------------------------------------------------------------
+# offer aging bumps + fee-model cap
+# ---------------------------------------------------------------------------
+
+
+def _offer_out(days_ago: float, apn="044", email="jane@x.com", offer=38500):
+    import time as _t
+
+    _seed_lead(apn=apn, email=email)
+    at = _t.strftime("%Y-%m-%d %H:%M:%S", _t.localtime(_t.time() - days_ago * 86400))
+    ledger.set_status("harris_tx", apn, "offer_out", at=at)
+    ledger.set_offer_amount("harris_tx", apn, offer)
+
+
+def test_bump_due_at_seven_days_idempotent_and_restates_offer(tmp_path):
+    from . import bumps
+
+    _env_db(tmp_path)
+    _offer_out(8.0)
+    conn = ledger.connect()
+    r1 = bumps.queue_bumps(conn=conn, log=lambda *_: None)
+    r2 = bumps.queue_bumps(conn=conn, log=lambda *_: None)
+    item = conn.execute(
+        "SELECT * FROM review_queue WHERE id LIKE 'bump-%'").fetchone()
+    conn.close()
+    assert r1["bumps_queued"] == 1 and r2["bumps_queued"] == 0   # idempotent
+    assert item["state"] == "pending_review" and item["draft_kind"] == "bump"
+    assert "$38,500" in item["draft"]            # the human's recorded offer
+    assert "circling back" in item["draft"]
+
+
+def test_fresh_offer_gets_no_bump_and_backfilled_old_offer_gets_final(tmp_path):
+    from . import bumps
+
+    _env_db(tmp_path)
+    _offer_out(1.5, apn="044")                    # Thomas at 36h: nothing
+    _offer_out(25.0, apn="055", email="old@x.com")
+    conn = ledger.connect()
+    report = bumps.queue_bumps(conn=conn, log=lambda *_: None)
+    items = conn.execute(
+        "SELECT id, draft FROM review_queue WHERE id LIKE 'bump-%'").fetchall()
+    conn.close()
+    assert report["bumps_queued"] == 1
+    assert items[0]["id"].endswith("-21d")        # latest tier only, not 7d too
+    assert "Last note" in items[0]["draft"]
+
+
+def test_bump_threads_under_last_reply_and_send_keeps_offer_out(tmp_path):
+    from . import bumps
+
+    _env_db(tmp_path)
+    _offer_out(8.0)
+    conn = ledger.connect()
+    ingest_mod.ingest_reply(_reply(text="thinking about it"), conn=conn)
+    bumps.queue_bumps(conn=conn, log=lambda *_: None)
+    sent = {}
+    result = review.approve(
+        "bump-harris_tx-044-7d", send=True, api_key="k", conn=conn,
+        http_request=lambda m, u, p, k: (sent.update(p), (200, "{}"))[1],
+        log=lambda *_: None)
+    status = conn.execute(
+        "SELECT status FROM leads WHERE apn='044'").fetchone()[0]
+    conn.close()
+    assert result["sent"]
+    assert sent["reply_to_uuid"] == "em-1"        # threads under seller's email
+    assert status == "offer_out"                  # bump never moves status
+
+
+def test_above_cap_lead_is_low_priority_no_holding_promise(tmp_path):
+    _env_db(tmp_path)
+    ledger.ingest_rows([{
+        "APN": "900", "County": "Harris", "State": "TX",
+        "Address": "9 Big Rd", "City": "Houston", "Zip": "77028",
+        "Email 1": "cliff@x.com", "Lot Size Sqft": "871200",
+        "Est. Value": "850,000",
+    }], source_list="t")
+    conn = ledger.connect()
+    ingest_mod.ingest_reply(_reply(id="em-c", email="cliff@x.com",
+                                   text="I'd consider 900k"), conn=conn)
+    _through_verify(conn, _LLM('{"classification": "price_given", '
+                               '"price_mentioned": 900000, "summary": "s"}'))
+    report = draft_mod.draft_verified(conn=conn,
+                                      llm=_LLM("SHOULD NEVER BE CALLED"),
+                                      log=lambda *_: None)
+    item = conn.execute("SELECT state, reason, draft FROM review_queue").fetchone()
+    conn.close()
+    assert report.get("low_priority") == 1
+    assert item["state"] == "needs_manual" and item["draft"] is None
+    assert "max_asset_value" in item["reason"]
+
+
+def test_ledger_set_helpers_backdate_stub_and_lookup(tmp_path):
+    _env_db(tmp_path)
+    # stub creation for a pre-ledger deal
+    assert ledger.ensure_lead("waller_tx", "15065", status="offer_out",
+                              note="thomas", email="thomas.brown33@icloud.com")
+    assert not ledger.ensure_lead("waller_tx", "15065")   # second time: no-op
+    hits = ledger.find_leads(email="thomas.brown33@icloud.com")
+    assert len(hits) == 1 and hits[0]["status"] == "offer_out"
+
+    _seed_lead(apn="2D", email="deepak@x.com")
+    hits = ledger.find_leads(address="1 land rd")
+    assert len(hits) == 1 and hits[0]["apn"] == "2D"
+
+
 if __name__ == "__main__":
     import sys
     import tempfile
