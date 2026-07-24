@@ -143,9 +143,21 @@ VERIFY_GATES: dict[str, list[str]] = {
 CHALLENGE_KEYS = ("challenge.otp", "challenge.captcha", "login.error")
 
 
+def _default_overlay() -> str | None:
+    """The repo's committed calibration file (tools/browser/browser.yaml),
+    auto-discovered so `git pull` alone updates VPS selectors — an explicit
+    --config path still overrides."""
+
+    from pathlib import Path
+
+    p = Path(__file__).with_name("browser.yaml")
+    return str(p) if p.is_file() else None
+
+
 def load_config(path: str | None = None) -> BrowserConfig:
     """Default genome, overlaid with a YAML file. Unknown keys are an error."""
 
+    path = path or _default_overlay()
     if not path:
         return DEFAULT_CONFIG
     import yaml
@@ -168,6 +180,7 @@ def load_selectors(path: str | None = None) -> dict[str, dict]:
     """SELECTORS defaults, overlaid per-key from a YAML `selectors:` block."""
 
     merged = {k: dict(v) for k, v in SELECTORS.items()}
+    path = path or _default_overlay()
     if not path:
         return merged
     import yaml

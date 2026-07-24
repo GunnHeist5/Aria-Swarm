@@ -105,6 +105,30 @@ def _run_check(config, args) -> int:
             # empty credentials (avoids failed-login noise / lockout).
             if not driver.is_present("app.ready", timeout_ms=4000):
                 driver.goto(config.login_url)
+                # With REAL stored credentials (never empty ones), attempt the
+                # actual login so calibration can reach the authenticated app.
+                # A challenge wall stops us cold; an unconfirmed app.ready is
+                # fine — we calibrate whatever page we land on.
+                creds = None
+                try:
+                    from .session import resolve_credentials
+
+                    creds = resolve_credentials(config)
+                except Exception:  # noqa: BLE001 — no creds => probe-only mode
+                    pass
+                if creds:
+                    from . import propstream as flow
+                    from .driver import AuthChallenge, VerificationError
+
+                    try:
+                        flow.login(driver, config, *creds)
+                        print("login: authenticated with stored credentials")
+                    except AuthChallenge as exc:
+                        print(f"login: CHALLENGE wall ({exc}) — stopped; "
+                              "never bypassed")
+                    except VerificationError as exc:
+                        print(f"login: submitted, app.ready unconfirmed "
+                              f"({exc}) — calibrating the page we're on")
             summary = getattr(driver, "page_summary", dict)()
             report = calibrate(driver, config)
             report["page"] = summary

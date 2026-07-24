@@ -1,0 +1,24 @@
+# PropStream selector calibration — REAL selectors observed on the live site
+# via `tools.browser.cli --check` DOM inventory (2026-07-24, login page).
+# Selectors are data, not secrets: committed so `git pull` calibrates the VPS.
+# App-side selectors get appended after the first authenticated inventory.
+
+selectors:
+  login.username:
+    by: css
+    css: 'input[name="username"]'
+  login.password:
+    by: css
+    css: 'input[name="password"]'
+  login.submit:
+    by: css
+    css: 'button[type="submit"].gradient-btn'
+  # OneTrust cookie banner: accept button when the banner is up (harmless if
+  # absent — the flow clicks consent only when present).
+  consent.accept:
+    by: css
+    css: '#onetrust-accept-btn-handler'
+  # Login failure surfaces as an alert/error text near the form.
+  login.error:
+    by: css
+    css: '.error, .alert, [class*="error"]'
