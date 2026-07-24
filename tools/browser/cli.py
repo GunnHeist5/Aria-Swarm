@@ -129,10 +129,32 @@ def _run_check(config, args) -> int:
                     except VerificationError as exc:
                         print(f"login: submitted, app.ready unconfirmed "
                               f"({exc}) — calibrating the page we're on")
+            # clear the single-session dialog + cookie banner if up
+            for key in ("session.proceed", "consent.accept"):
+                try:
+                    if driver.is_present(key, timeout_ms=2500):
+                        driver.click(key)
+                except Exception:  # noqa: BLE001
+                    pass
             summary = getattr(driver, "page_summary", dict)()
             report = calibrate(driver, config)
             report["page"] = summary
             report["dom"] = getattr(driver, "dom_inventory", list)()
+
+            # Stage 2: authenticated? type the county to reveal the search
+            # suggestions + whatever filter UI appears — the DOM we still
+            # can't see any other way. Read-only: nothing is saved/exported.
+            if driver.is_present("app.ready", timeout_ms=4000):
+                try:
+                    driver.fill("search.box",
+                                f"{args.county.title()} County, "
+                                f"{args.state.upper()}")
+                    driver.is_present("search.suggestion", timeout_ms=5000)
+                    report["dom_after_search"] = \
+                        getattr(driver, "dom_inventory", list)(60)
+                    driver.screenshot("calib-stage2-search-typed")
+                except Exception as exc:  # noqa: BLE001
+                    report["dom_after_search"] = [{"error": str(exc)}]
     except Exception as exc:  # noqa: BLE001
         print(f"calibration could not launch a browser: {exc}", file=sys.stderr)
         return 1
@@ -148,6 +170,12 @@ def _run_check(config, args) -> int:
             attrs = " ".join(f"{k}={v!r}" for k, v in el.items()
                              if v and k != "tag")
             print(f"  <{el['tag']}> {attrs}")
+    if report.get("dom_after_search"):
+        print("DOM AFTER TYPING COUNTY (suggestions/filters UI):")
+        for el in report["dom_after_search"]:
+            attrs = " ".join(f"{k}={v!r}" for k, v in el.items()
+                             if v and k != "tag")
+            print(f"  <{el.get('tag', '?')}> {attrs}")
     print(render_report(report))
     print("screenshots under:", config.artifact_dir)
     print(json.dumps(report))

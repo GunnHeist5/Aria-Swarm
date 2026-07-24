@@ -63,6 +63,10 @@ def login(driver: PageDriver, config: BrowserConfig, username: str,
     driver.click("login.submit")
 
     _detect_challenge(driver)  # OTP/CAPTCHA appears AFTER submit
+    # Single-session product rule: PropStream asks to end the other open
+    # session ("Proceed") when this username is logged in elsewhere.
+    if driver.is_present("session.proceed", timeout_ms=4000):
+        driver.click("session.proceed")
     _verify(driver, "login", config)
 
 

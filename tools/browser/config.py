@@ -96,6 +96,12 @@ SELECTORS: dict[str, dict] = {
     "search.box": {"by": "placeholder", "text": "Enter County, City, Zip"},
     "search.submit": {"by": "role", "role": "button", "name": "Search"},
     # filter panel
+    # single-session dialog: "username is currently still logged in ... PROCEED
+    # ends the other session" — always click through (observed live 2026-07-24)
+    "session.proceed": {"by": "role", "role": "button", "name": "Proceed"},
+    # search suggestion dropdown (SPA autocomplete after typing the county)
+    "search.suggestion": {"by": "css",
+                          "css": '[class*="suggestion"] li, [class*="autocomplete"] li, [role="option"]'},
     "filters.open": {"by": "role", "role": "button", "name": "Filter"},
     "filters.property_class": {"by": "label", "text": "Property Class"},
     "filters.property_class_option": {"by": "role", "role": "option",

@@ -22,3 +22,13 @@ selectors:
   login.error:
     by: css
     css: '.error, .alert, [class*="error"]'
+
+  # --- authenticated app (observed live 2026-07-24, app.propstream.com) ---
+  # The search input is the most stable authenticated-state anchor (element
+  # ids are session-generated; CSS-module class names are build-hashed).
+  app.ready:
+    by: placeholder
+    text: 'Enter County, City, Zip Code(s) or APN #'
+  search.box:
+    by: placeholder
+    text: 'Enter County, City, Zip Code(s) or APN #'
