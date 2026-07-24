@@ -291,8 +291,15 @@ def _cmd_ledger(args, config) -> int:
                 ledger_mod.ensure_lead(county, apn, status=args.status,
                                        note=args.note, email=args.email,
                                        conn=conn)
+                if args.offered_on:
+                    # re-stamp the transition at the real date so offer
+                    # aging (bumps) runs from when the offer actually went out
+                    ledger_mod.set_status(county, apn, args.status,
+                                          note=args.note, at=args.offered_on,
+                                          conn=conn)
                 print(f"[ledger] created manual stub {county}/{apn} "
-                      f"-> {args.status}")
+                      f"-> {args.status}"
+                      + (f" as-of {args.offered_on}" if args.offered_on else ""))
                 if args.offer is not None:
                     ledger_mod.set_offer_amount(county, apn, args.offer,
                                                 conn=conn)
