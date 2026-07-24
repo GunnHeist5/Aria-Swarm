@@ -105,12 +105,18 @@ def _run_check(config, args) -> int:
             # empty credentials (avoids failed-login noise / lockout).
             if not driver.is_present("app.ready", timeout_ms=4000):
                 driver.goto(config.login_url)
+            summary = getattr(driver, "page_summary", dict)()
             report = calibrate(driver, config)
+            report["page"] = summary
     except Exception as exc:  # noqa: BLE001
         print(f"calibration could not launch a browser: {exc}", file=sys.stderr)
         return 1
     import json
 
+    if report.get("page"):
+        print(f"PAGE url   : {report['page'].get('url')}")
+        print(f"PAGE title : {report['page'].get('title')}")
+        print(f"PAGE text  : {report['page'].get('text', '')[:300]}")
     print(render_report(report))
     print("screenshots under:", config.artifact_dir)
     print(json.dumps(report))

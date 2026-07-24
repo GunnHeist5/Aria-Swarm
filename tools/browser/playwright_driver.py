@@ -100,6 +100,21 @@ class PlaywrightPageDriver:
     def current_url(self) -> str:
         return self.page.url
 
+    def page_summary(self) -> dict:
+        """Where are we? url + title + a visible-text excerpt, for calibration
+        diagnostics (an all-MISSING sweep usually means wrong page, not 37
+        wrong selectors). Never raises."""
+
+        out = {"url": "", "title": "", "text": ""}
+        try:
+            out["url"] = self.page.url
+            out["title"] = self.page.title()
+            out["text"] = " ".join(
+                (self.page.inner_text("body", timeout=3000) or "").split())[:500]
+        except Exception:  # noqa: BLE001
+            pass
+        return out
+
     def screenshot(self, label: str) -> str:
         import os
 
