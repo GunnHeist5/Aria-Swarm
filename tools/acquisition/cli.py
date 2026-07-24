@@ -191,6 +191,11 @@ def _cmd_review(args, config) -> int:
     if args.action == "digest":
         print(review_mod.digest())
         return 0
+    if args.action == "sweep":
+        n = review_mod.sweep(note=args.note or "historical sweep — statuses "
+                             "recorded in ledger")
+        print(f"[review] swept {n} pending item(s) to rejected")
+        return 0
     if not args.id:
         print("[review] approve/reject/snooze need an item id")
         return 1
@@ -500,7 +505,7 @@ def main(argv: list[str] | None = None) -> int:
 
     p = sub.add_parser("review", help="The approval queue")
     p.add_argument("action", choices=("list", "approve", "reject", "snooze",
-                                      "digest"),
+                                      "digest", "sweep"),
                    nargs="?", default="list")
     p.add_argument("id", nargs="?", default=None)
     p.add_argument("--send", action="store_true",

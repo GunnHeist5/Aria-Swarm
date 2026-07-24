@@ -276,6 +276,18 @@ def ingest_rows(rows: list[dict], *, source_list: str,
                 report["inserted"] += 1
             else:
                 report["duplicate"] += 1
+                # Contact backfill for rows ingested before the emails
+                # column existed: enrich ONLY missing contact data — status
+                # and everything human-set stays untouched (first wins).
+                if all_emails:
+                    fixed = conn.execute(
+                        "UPDATE leads SET emails=?, updated_at=?, "
+                        "email2=COALESCE(email2, ?) "
+                        "WHERE county_key=? AND apn=? AND emails IS NULL",
+                        (json.dumps(all_emails), now, email2, ckey, apn))
+                    if fixed.rowcount:
+                        report["contacts_backfilled"] = \
+                            report.get("contacts_backfilled", 0) + 1
         conn.commit()
     finally:
         if own:

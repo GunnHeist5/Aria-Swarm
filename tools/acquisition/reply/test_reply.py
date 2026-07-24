@@ -494,6 +494,38 @@ def test_above_cap_lead_is_low_priority_no_holding_promise(tmp_path):
     assert "max_asset_value" in item["reason"]
 
 
+def test_duplicate_ingest_backfills_missing_contact_emails(tmp_path):
+    _env_db(tmp_path)
+    row = {"APN": "044", "County": "Harris", "State": "TX",
+           "Address": "1 Land Rd", "City": "Houston", "Zip": "77028",
+           "Email 1": "a@x.com", "Email 3": "personal@gmail.com",
+           "Lot Size Sqft": "21780"}
+    ledger.ingest_rows([row], source_list="t", mark_enrolled=True)
+    conn = ledger.connect()
+    # simulate a pre-migration row: emails column empty, human-set status
+    conn.execute("UPDATE leads SET emails=NULL, status='offer_out'")
+    conn.commit()
+    report = ledger.ingest_rows([row], source_list="t", conn=conn)
+    lead = conn.execute("SELECT emails, status FROM leads").fetchone()
+    conn.close()
+    assert report["contacts_backfilled"] == 1
+    assert "personal@gmail.com" in lead["emails"]     # contacts enriched...
+    assert lead["status"] == "offer_out"              # ...status untouched
+    assert ledger.find_leads(email="personal@gmail.com")
+
+
+def test_review_sweep_bulk_closes_pending(tmp_path):
+    conn = _queued_draft(tmp_path)
+    conn.execute("INSERT INTO review_queue (id, lead_email, state, "
+                 "created_at, updated_at) VALUES ('m1', 'x@y.com', "
+                 "'needs_manual', '2026-01-01', '2026-01-01')")
+    conn.commit()
+    n = review.sweep(note="test sweep", conn=conn)
+    left = review.pending(conn)
+    conn.close()
+    assert n == 2 and left == []
+
+
 def test_ledger_set_helpers_backdate_stub_and_lookup(tmp_path):
     _env_db(tmp_path)
     # stub creation for a pre-ledger deal

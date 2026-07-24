@@ -153,6 +153,30 @@ def snooze(item_id: str, *, days: float = 1.0,
     return until
 
 
+def sweep(*, note: str = "historical sweep",
+          conn: sqlite3.Connection | None = None) -> int:
+    """Bulk-close EVERY currently pending item (pending_review + needs_manual).
+
+    For clearing pre-ledger history after the human has recorded statuses —
+    an explicit operator action, never called by any automated path. Returns
+    the number of items closed.
+    """
+
+    own = conn is None
+    conn = conn or ledger.connect()
+    try:
+        ledger.init_db(conn)
+        cur = conn.execute(
+            "UPDATE review_queue SET state='rejected', reason=?, updated_at=? "
+            "WHERE state IN ('pending_review', 'needs_manual')",
+            (note, ledger._stamp()))
+        conn.commit()
+        return cur.rowcount
+    finally:
+        if own:
+            conn.close()
+
+
 def digest(conn: sqlite3.Connection | None = None) -> str:
     """Markdown digest of everything awaiting the human."""
 
