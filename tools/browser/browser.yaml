@@ -50,3 +50,12 @@ selectors:
     by: role
     role: button
     name: 'View Properties'
+  # Property Classification chips. NOTE 'Vacant Land' also appears as a Lead
+  # List row ("Vacant Land 0"), so the chip must be scoped under the
+  # "Property Classification(s)" heading — the flow does this positionally,
+  # not by these selectors alone (kept for reference/manual calibration).
+  filters.property_class: {by: text, text: 'Property Classification(s)'}
+  # Confirmed panel labels (Value & Equity section) for the recipe ranges:
+  #   Lot Size (SqFt) · Years of Ownership · Assessed Improvement Value ·
+  #   Improvement to Tax Value % · Estimated Value · Assessed Land Value
+  # These are label-anchored Min/Max pairs (fill_labeled_range), never by id.
