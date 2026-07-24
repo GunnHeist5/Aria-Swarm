@@ -108,6 +108,7 @@ def _run_check(config, args) -> int:
             summary = getattr(driver, "page_summary", dict)()
             report = calibrate(driver, config)
             report["page"] = summary
+            report["dom"] = getattr(driver, "dom_inventory", list)()
     except Exception as exc:  # noqa: BLE001
         print(f"calibration could not launch a browser: {exc}", file=sys.stderr)
         return 1
@@ -117,6 +118,12 @@ def _run_check(config, args) -> int:
         print(f"PAGE url   : {report['page'].get('url')}")
         print(f"PAGE title : {report['page'].get('title')}")
         print(f"PAGE text  : {report['page'].get('text', '')[:300]}")
+    if report.get("dom"):
+        print("DOM INVENTORY (visible elements — selector raw material):")
+        for el in report["dom"]:
+            attrs = " ".join(f"{k}={v!r}" for k, v in el.items()
+                             if v and k != "tag")
+            print(f"  <{el['tag']}> {attrs}")
     print(render_report(report))
     print("screenshots under:", config.artifact_dir)
     print(json.dumps(report))

@@ -100,6 +100,30 @@ class PlaywrightPageDriver:
     def current_url(self) -> str:
         return self.page.url
 
+    def dom_inventory(self, limit: int = 40) -> list[dict]:
+        """Visible inputs/buttons with their identifying attributes — the raw
+        material for writing browser.yaml selectors. Never raises."""
+
+        try:
+            return self.page.evaluate(
+                """(limit) => [...document.querySelectorAll(
+                       'input, button, select, textarea, [role=button], a[href]')]
+                   .filter(el => el.offsetParent !== null)
+                   .slice(0, limit)
+                   .map(el => ({
+                       tag: el.tagName.toLowerCase(),
+                       type: el.type || null,
+                       name: el.name || null,
+                       id: el.id || null,
+                       placeholder: el.placeholder || null,
+                       aria: el.getAttribute('aria-label'),
+                       testid: el.getAttribute('data-testid'),
+                       cls: (el.className || '').toString().slice(0, 60),
+                       text: (el.innerText || el.value || '').trim().slice(0, 40),
+                   }))""", limit)
+        except Exception:  # noqa: BLE001
+            return []
+
     def page_summary(self) -> dict:
         """Where are we? url + title + a visible-text excerpt, for calibration
         diagnostics (an all-MISSING sweep usually means wrong page, not 37
