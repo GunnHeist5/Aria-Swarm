@@ -37,3 +37,14 @@ selectors:
   filters.open:
     by: text
     text: 'Filters'
+  # --- inside the Filters panel (observed live 2026-07-24, stage-3 DOM) ---
+  # The panel's own filter-name search: the robust way to reach any filter
+  # section (the Min/Max input ids are random UUIDs — never target those).
+  filters.find:
+    by: placeholder
+    text: 'Find a Filter'
+  # "View Properties" executes the filtered search — this is our apply.
+  filters.apply:
+    by: role
+    role: button
+    name: 'View Properties'

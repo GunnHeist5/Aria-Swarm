@@ -100,6 +100,21 @@ class PlaywrightPageDriver:
     def current_url(self) -> str:
         return self.page.url
 
+    def force_fill(self, key: str, text: str) -> None:
+        """fill() with a keyboard fallback: SPA dropdowns/overlays can make
+        the strict actionability wait time out even though the element is
+        right there — focus() + keyboard typing has far weaker preconditions."""
+
+        loc = self._loc(key).first
+        try:
+            loc.fill(text, timeout=4000)
+        except Exception:  # noqa: BLE001
+            loc.focus(timeout=4000)
+            self.page.keyboard.press("Control+A")
+            self.page.keyboard.press("Delete")
+            if text:
+                self.page.keyboard.type(text, delay=40)
+
     def dom_inventory(self, limit: int = 40) -> list[dict]:
         """Visible inputs/buttons with their identifying attributes — the raw
         material for writing browser.yaml selectors. Never raises."""

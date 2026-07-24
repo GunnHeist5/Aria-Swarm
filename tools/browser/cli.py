@@ -155,11 +155,11 @@ def _run_check(config, args) -> int:
                         driver.click("consent.accept")
                     except Exception:  # noqa: BLE001
                         pass
+                fill = getattr(driver, "force_fill", driver.fill)
                 try:
                     driver.click("search.box")
-                    driver.fill("search.box",
-                                f"{args.county.title()} County, "
-                                f"{args.state.upper()}")
+                    fill("search.box", f"{args.county.title()} County, "
+                                       f"{args.state.upper()}")
                     driver.is_present("search.suggestion", timeout_ms=5000)
                     report["dom_after_search"] = \
                         getattr(driver, "dom_inventory", list)(60)
@@ -171,13 +171,33 @@ def _run_check(config, args) -> int:
                 try:
                     if driver.is_present("filters.open", timeout_ms=3000):
                         driver.click("filters.open")
-                        driver.is_present("filters.property_class",
-                                          timeout_ms=4000)
+                        driver.is_present("filters.find", timeout_ms=4000)
                         report["dom_filters"] = \
                             getattr(driver, "dom_inventory", list)(90)
                         driver.screenshot("calib-stage3-filters-open")
                 except Exception as exc:  # noqa: BLE001
                     report["dom_filters"] = [{"error": str(exc)}]
+                # Stage 4: probe Find-a-Filter with each term the recipes
+                # need — reveals every filter section's real name + option
+                # chips. Read-only; the find box is cleared between probes.
+                if driver.is_present("filters.find", timeout_ms=2000):
+                    report["filter_probes"] = {}
+                    for term in ("Property Type", "Property Class",
+                                 "Lot Size", "Ownership", "Owner Occupied",
+                                 "Improvement", "Equity", "Tax"):
+                        try:
+                            fill("filters.find", term)
+                            driver.is_present("filters.apply", timeout_ms=1500)
+                            report["filter_probes"][term] = \
+                                getattr(driver, "dom_inventory", list)(45)
+                            driver.screenshot(
+                                "calib-stage4-" + term.lower().replace(" ", "-"))
+                        except Exception as exc:  # noqa: BLE001
+                            report["filter_probes"][term] = [{"error": str(exc)}]
+                    try:
+                        fill("filters.find", "")
+                    except Exception:  # noqa: BLE001
+                        pass
     except Exception as exc:  # noqa: BLE001
         print(f"calibration could not launch a browser: {exc}", file=sys.stderr)
         return 1
@@ -193,16 +213,25 @@ def _run_check(config, args) -> int:
             attrs = " ".join(f"{k}={v!r}" for k, v in el.items()
                              if v and k != "tag")
             print(f"  <{el['tag']}> {attrs}")
+    def _print_els(els):
+        for el in els:
+            attrs = " ".join(f"{k}={v!r}" for k, v in el.items()
+                             if v and k != "tag")
+            print(f"  <{el.get('tag', '?')}> {attrs}")
+
     for section, label in (("dom_after_search",
                             "DOM AFTER TYPING COUNTY (suggestions):"),
                            ("dom_filters",
                             "DOM WITH FILTERS PANEL OPEN:")):
         if report.get(section):
             print(label)
-            for el in report[section]:
-                attrs = " ".join(f"{k}={v!r}" for k, v in el.items()
-                                 if v and k != "tag")
-                print(f"  <{el.get('tag', '?')}> {attrs}")
+            _print_els(report[section])
+    for term, els in (report.get("filter_probes") or {}).items():
+        # only the informative elements: texts and labeled inputs, skipping
+        # the constant sidebar/map chrome
+        print(f"FILTER PROBE {term!r}:")
+        _print_els([e for e in els
+                    if e.get("text") or e.get("placeholder") or e.get("error")])
     print(render_report(report))
     print("screenshots under:", config.artifact_dir)
     print(json.dumps(report))
