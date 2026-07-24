@@ -55,6 +55,10 @@ class BrowserConfig:
     storage_state: str = "~/.automaton/propstream/storage_state.json"  # credential, 0600
     user_data_dir: str = "~/.automaton/propstream/profile"             # 0700
     artifact_dir: str = "~/.automaton/propstream/artifacts"
+    # Where DEPLOY.md installs the Playwright browsers (unprivileged, survives
+    # venv rebuilds). Applied via env setdefault when the dir exists, so a
+    # bare `python -m tools.browser.cli` works without remembering the var.
+    browsers_path: str = "~/.automaton/ms-playwright"
     headless: bool = True                 # seed-login / --headful flip this to False
 
     # -- credential env NAMES (values via get_secret; never inline, never logged) --

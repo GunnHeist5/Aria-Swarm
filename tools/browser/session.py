@@ -54,6 +54,13 @@ def real_driver(config: BrowserConfig = DEFAULT_CONFIG, *, headless: bool | None
             "a screen (see DEPLOY.md) and copy storage_state.json here")
     selectors = load_selectors(selectors_path)
 
+    # Point Playwright at the DEPLOY.md browser install location unless the
+    # operator already set the env var — otherwise a bare CLI run looks in
+    # ~/.cache and demands a re-download it doesn't need.
+    browsers = Path(config.browsers_path).expanduser()
+    if browsers.is_dir():
+        os.environ.setdefault("PLAYWRIGHT_BROWSERS_PATH", str(browsers))
+
     from playwright.sync_api import sync_playwright
 
     from .playwright_driver import PlaywrightPageDriver
