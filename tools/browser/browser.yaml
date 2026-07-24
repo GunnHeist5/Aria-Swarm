@@ -32,3 +32,8 @@ selectors:
   search.box:
     by: placeholder
     text: 'Enter County, City, Zip Code(s) or APN #'
+  # top bar reads "Filters | Save | Clear All" — the Filters control opens
+  # the filter panel (page text confirms; not a <button>, so anchor by text)
+  filters.open:
+    by: text
+    text: 'Filters'

@@ -145,7 +145,18 @@ def _run_check(config, args) -> int:
             # suggestions + whatever filter UI appears — the DOM we still
             # can't see any other way. Read-only: nothing is saved/exported.
             if driver.is_present("app.ready", timeout_ms=4000):
+                # The OneTrust overlay intercepts pointer events — clicking
+                # Accept once isn't always enough (it can re-render). Retry
+                # until the accept button is actually gone.
+                for _ in range(3):
+                    if not driver.is_present("consent.accept", timeout_ms=1500):
+                        break
+                    try:
+                        driver.click("consent.accept")
+                    except Exception:  # noqa: BLE001
+                        pass
                 try:
+                    driver.click("search.box")
                     driver.fill("search.box",
                                 f"{args.county.title()} County, "
                                 f"{args.state.upper()}")
@@ -155,6 +166,18 @@ def _run_check(config, args) -> int:
                     driver.screenshot("calib-stage2-search-typed")
                 except Exception as exc:  # noqa: BLE001
                     report["dom_after_search"] = [{"error": str(exc)}]
+                # Stage 3: open the Filters panel and inventory it — the
+                # whole filter selector set lives in there.
+                try:
+                    if driver.is_present("filters.open", timeout_ms=3000):
+                        driver.click("filters.open")
+                        driver.is_present("filters.property_class",
+                                          timeout_ms=4000)
+                        report["dom_filters"] = \
+                            getattr(driver, "dom_inventory", list)(90)
+                        driver.screenshot("calib-stage3-filters-open")
+                except Exception as exc:  # noqa: BLE001
+                    report["dom_filters"] = [{"error": str(exc)}]
     except Exception as exc:  # noqa: BLE001
         print(f"calibration could not launch a browser: {exc}", file=sys.stderr)
         return 1
@@ -170,12 +193,16 @@ def _run_check(config, args) -> int:
             attrs = " ".join(f"{k}={v!r}" for k, v in el.items()
                              if v and k != "tag")
             print(f"  <{el['tag']}> {attrs}")
-    if report.get("dom_after_search"):
-        print("DOM AFTER TYPING COUNTY (suggestions/filters UI):")
-        for el in report["dom_after_search"]:
-            attrs = " ".join(f"{k}={v!r}" for k, v in el.items()
-                             if v and k != "tag")
-            print(f"  <{el.get('tag', '?')}> {attrs}")
+    for section, label in (("dom_after_search",
+                            "DOM AFTER TYPING COUNTY (suggestions):"),
+                           ("dom_filters",
+                            "DOM WITH FILTERS PANEL OPEN:")):
+        if report.get(section):
+            print(label)
+            for el in report[section]:
+                attrs = " ".join(f"{k}={v!r}" for k, v in el.items()
+                                 if v and k != "tag")
+                print(f"  <{el.get('tag', '?')}> {attrs}")
     print(render_report(report))
     print("screenshots under:", config.artifact_dir)
     print(json.dumps(report))
