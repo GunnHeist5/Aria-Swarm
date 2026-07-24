@@ -107,6 +107,25 @@ class PlaywrightPageDriver:
 
         self.page.keyboard.type(text, delay=delay_ms)
 
+    def fill_labeled_range(self, label: str, min_value=None, max_value=None) -> None:
+        """Fill the Min/Max inputs belonging to a labeled filter section.
+
+        The panel's input ids are random UUIDs, so the anchor is the section's
+        visible label text; the section's own Min/Max are the FIRST such
+        inputs following it in document order. Values are typed (keyboard) so
+        the SPA's change handlers fire."""
+
+        anchor = self.page.get_by_text(label, exact=True).last
+        for placeholder, value in (("Min", min_value), ("Max", max_value)):
+            if value is None:
+                continue
+            target = anchor.locator(
+                f"xpath=following::input[@placeholder='{placeholder}'][1]")
+            target.click(timeout=4000)
+            self.page.keyboard.press("Control+A")
+            self.page.keyboard.press("Delete")
+            self.page.keyboard.type(str(value), delay=30)
+
     def click_text(self, text: str) -> None:
         """Click the last visible element with this exact text (section
         headings that aren't buttons; input VALUES are not text nodes, so a

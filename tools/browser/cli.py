@@ -182,39 +182,32 @@ def _run_check(config, args) -> int:
                 # Stage 4: probe Find-a-Filter with each term the recipes
                 # need — reveals every filter section's real name + option
                 # chips. Read-only; the find box is cleared between probes.
+                # Stage 4: full panel text (section labels below the fold)
                 if driver.is_present("filters.find", timeout_ms=2000):
-                    report["filter_probes"] = {}
-                    for term in ("Property Type", "Lot Size", "Ownership",
-                                 "Owner Occupied", "Improvement", "Equity",
-                                 "Tax"):
-                        probe: dict = {}
-                        try:
-                            fill("filters.find", term)
-                            driver.is_present("filters.apply", timeout_ms=1500)
-                            # expand the matched section (headings aren't
-                            # buttons; the find-box VALUE never matches text)
-                            try:
-                                getattr(driver, "click_text",
-                                        lambda t: None)(term)
-                                driver.is_present("filters.apply",
-                                                  timeout_ms=1200)
-                            except Exception:  # noqa: BLE001
-                                pass
-                            probe["text"] = getattr(driver, "page_text",
-                                                    lambda *_: "")(1400)
-                            probe["els"] = [
-                                e for e in
-                                getattr(driver, "dom_inventory", list)(60)
-                                if e.get("text") or e.get("placeholder")]
-                            driver.screenshot(
-                                "calib-stage4-" + term.lower().replace(" ", "-"))
-                        except Exception as exc:  # noqa: BLE001
-                            probe["error"] = str(exc)
-                        report["filter_probes"][term] = probe
-                        try:
-                            fill("filters.find", "")
-                        except Exception:  # noqa: BLE001
-                            pass
+                    report["panel_text_full"] = getattr(
+                        driver, "page_text", lambda *_: "")(5000)
+                # Stage 5: the vacant-land dry search — click the Vacant Land
+                # classification chip, View Properties, and inventory the
+                # RESULTS view (count / select-all / export live there).
+                # Read-only: nothing is saved, skip-traced, or exported.
+                try:
+                    getattr(driver, "click_text", lambda t: None)("Vacant Land")
+                    driver.is_present("filters.apply", timeout_ms=1500)
+                    getattr(driver, "fill_labeled_range",
+                            lambda *a, **k: None)("Lot Size (SqFt)",
+                                                  5000, None)
+                    driver.click("filters.apply")   # "View Properties"
+                    driver.is_present("results.select_all", timeout_ms=8000)
+                    report["results_page"] = {
+                        "page": getattr(driver, "page_summary", dict)(),
+                        "els": [e for e in
+                                getattr(driver, "dom_inventory", list)(70)
+                                if e.get("text") or e.get("placeholder")
+                                or e.get("aria")],
+                    }
+                    driver.screenshot("calib-stage5-results")
+                except Exception as exc:  # noqa: BLE001
+                    report["results_page"] = {"error": str(exc)}
     except Exception as exc:  # noqa: BLE001
         print(f"calibration could not launch a browser: {exc}", file=sys.stderr)
         return 1
@@ -243,13 +236,18 @@ def _run_check(config, args) -> int:
         if report.get(section):
             print(label)
             _print_els(report[section])
-    for term, probe in (report.get("filter_probes") or {}).items():
-        print(f"FILTER PROBE {term!r}:")
-        if probe.get("error"):
-            print(f"  error: {probe['error']}")
-            continue
-        print(f"  panel text: {probe.get('text', '')}")
-        _print_els(probe.get("els") or [])
+    if report.get("panel_text_full"):
+        print(f"FULL PANEL TEXT: {report['panel_text_full']}")
+    results = report.get("results_page") or {}
+    if results:
+        print("RESULTS PAGE (after Vacant Land + View Properties):")
+        if results.get("error"):
+            print(f"  error: {results['error']}")
+        else:
+            page = results.get("page") or {}
+            print(f"  url: {page.get('url')}")
+            print(f"  text: {page.get('text', '')}")
+            _print_els(results.get("els") or [])
     print(render_report(report))
     print("screenshots under:", config.artifact_dir)
     print(json.dumps(report))
