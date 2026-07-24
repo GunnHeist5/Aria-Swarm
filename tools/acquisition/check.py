@@ -87,8 +87,38 @@ def run_check(*, http_request=None) -> dict:
         out["reply_dry_run"] = {"error": str(exc)}
         out["ok"] = False
 
-    # 6. PropStream login probe — arrives with M3 (browser pull)
-    out["propstream"] = "not built yet (M3)"
+    # 6. PropStream pull readiness (M3 built; the gate is the seeded session).
+    #    We do NOT log in here — just report whether the pieces are in place so
+    #    `acquire pull` will work: creds present, a seeded session file exists,
+    #    and Playwright is importable.
+    ps: dict = {}
+    try:
+        from ..browser.config import DEFAULT_CONFIG as BCFG
+        from ..integrations.secrets import get_secret
+
+        state_path = Path(BCFG.storage_state).expanduser()
+        ps["session_seeded"] = state_path.exists()
+        try:
+            get_secret("PROPSTREAM_USERNAME", required=True)
+            get_secret("PROPSTREAM_PASSWORD", required=True)
+            ps["credentials"] = True
+        except Exception:  # noqa: BLE001
+            ps["credentials"] = False
+        try:
+            import playwright  # noqa: F401
+
+            ps["playwright_installed"] = True
+        except Exception:  # noqa: BLE001
+            ps["playwright_installed"] = False
+        ps["ready"] = all((ps["session_seeded"], ps["credentials"],
+                          ps["playwright_installed"]))
+        if not ps["ready"]:
+            need = [k for k in ("session_seeded", "credentials",
+                                "playwright_installed") if not ps.get(k)]
+            ps["blocked_on"] = need
+    except Exception as exc:  # noqa: BLE001
+        ps = {"error": str(exc), "ready": False}
+    out["propstream"] = ps
 
     return out
 
