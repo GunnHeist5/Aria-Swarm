@@ -174,6 +174,7 @@ def _run_check(config, args) -> int:
                             f"{args.county.title()} County")
                         if report["suggestions_seen"]:
                             break
+                    driver.screenshot("calib-stage2-suggestions")
                     if not report["suggestions_seen"]:
                         press = getattr(driver, "press_key", lambda k: None)
                         press("ArrowDown")
