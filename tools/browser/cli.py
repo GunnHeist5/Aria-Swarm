@@ -232,8 +232,9 @@ def _run_check(config, args) -> int:
                     # Stage 6: select-all reveals the grid's action bar
                     # (Add to List / Skip Trace / Export). Selecting rows
                     # commits nothing — still read-only.
-                    if getattr(driver, "click_first_checkbox",
-                               lambda: False)():
+                    report["checkbox_clicked"] = getattr(
+                        driver, "click_first_checkbox", lambda: "")()
+                    if report["checkbox_clicked"]:
                         before = set((report["results_recon"] or {})
                                      .get("buttons") or [])
                         driver.is_present("results.add_to_list",
@@ -278,6 +279,7 @@ def _run_check(config, args) -> int:
         print(f"results count  : {rr.get('count_text', '')!r}")
         print(f"results buttons: {rr.get('buttons')}")
         print(f"checkbox-like  : {len(rr.get('checkbox_like') or [])} found")
+    print(f"checkbox click : {report.get('checkbox_clicked')!r}")
     print(f"ACTION BAR     : {report.get('action_bar')}")
     print(f"all btns after : {report.get('all_buttons_after_select')}")
     print(f"\nfull report    : {report_path}")
