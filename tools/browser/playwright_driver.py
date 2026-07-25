@@ -129,6 +129,30 @@ class PlaywrightPageDriver:
     def press_key(self, key: str) -> None:
         self.page.keyboard.press(key)
 
+    def click_button_containing(self, words: list) -> str:
+        """JS-click the first visible button whose text contains ALL words —
+        tolerant of dynamic labels like 'View 28,405 Properties'. Returns the
+        matched button's text ('' if none found)."""
+
+        try:
+            return self.page.evaluate(
+                """(words) => {
+                    for (const el of document.querySelectorAll(
+                            'button, [role=button]')) {
+                        const r = el.getBoundingClientRect();
+                        if (r.width === 0 || r.height === 0) continue;
+                        const t = (el.innerText || '').trim();
+                        if (words.every(w =>
+                                t.toLowerCase().includes(w.toLowerCase()))) {
+                            el.click();
+                            return t.slice(0, 60);
+                        }
+                    }
+                    return '';
+                }""", words) or ""
+        except Exception:  # noqa: BLE001
+            return ""
+
     def find_and_click_suggestion(self, needle: str) -> list[dict]:
         """Find visible elements (any tag) whose own text contains ``needle``
         — the autocomplete suggestions, wherever and however they render —

@@ -217,7 +217,13 @@ def _run_check(config, args) -> int:
                     # it (Escape closes the whole Filters panel — seen live)
                     getattr(driver, "press_key", lambda k: None)("Tab")
                     driver.screenshot("calib-stage5a-filters-set")
-                    driver.click("filters.apply")   # "View Properties"
+                    # the button's label may carry a live count ('View 28,405
+                    # Properties'), so match by contained words, not exact name
+                    vp = getattr(driver, "click_button_containing",
+                                 lambda w: "")(["View", "Propert"])
+                    report["view_properties_btn"] = vp
+                    if not vp:
+                        driver.click("filters.apply")   # exact-name fallback
                     driver.is_present("results.select_all", timeout_ms=9000) \
                         or driver.is_present("app.ready", timeout_ms=3000)
                     report["results_recon"] = getattr(
@@ -249,6 +255,7 @@ def _run_check(config, args) -> int:
     print(f"suggestions    : {report.get('suggestions_seen')}")
     print(f"counters       : {report.get('counters_after_search')}")
     print(f"filters opened : {report.get('filters_opened')}")
+    print(f"view-props btn : {report.get('view_properties_btn')!r}")
     rr = report.get("results_recon") or {}
     if rr.get("error"):
         print(f"results recon  : ERROR {rr['error']}")
