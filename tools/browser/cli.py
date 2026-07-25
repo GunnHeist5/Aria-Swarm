@@ -229,6 +229,21 @@ def _run_check(config, args) -> int:
                     report["results_recon"] = getattr(
                         driver, "results_recon", dict)()
                     driver.screenshot("calib-stage5b-results")
+                    # Stage 6: select-all reveals the grid's action bar
+                    # (Add to List / Skip Trace / Export). Selecting rows
+                    # commits nothing — still read-only.
+                    if getattr(driver, "click_first_checkbox",
+                               lambda: False)():
+                        before = set((report["results_recon"] or {})
+                                     .get("buttons") or [])
+                        driver.is_present("results.add_to_list",
+                                          timeout_ms=2500)
+                        after = getattr(driver, "visible_button_texts",
+                                        list)()
+                        report["action_bar"] = [b for b in after
+                                                if b not in before]
+                        report["all_buttons_after_select"] = after
+                        driver.screenshot("calib-stage6-selected")
                 except Exception as exc:  # noqa: BLE001
                     report["results_recon"] = {"error": str(exc)}
     except Exception as exc:  # noqa: BLE001
@@ -262,7 +277,9 @@ def _run_check(config, args) -> int:
     else:
         print(f"results count  : {rr.get('count_text', '')!r}")
         print(f"results buttons: {rr.get('buttons')}")
-        print(f"checkbox-like  : {rr.get('checkbox_like')}")
+        print(f"checkbox-like  : {len(rr.get('checkbox_like') or [])} found")
+    print(f"ACTION BAR     : {report.get('action_bar')}")
+    print(f"all btns after : {report.get('all_buttons_after_select')}")
     print(f"\nfull report    : {report_path}")
     print("screenshots    :", config.artifact_dir)
     return 0 if report["ok"] else 1

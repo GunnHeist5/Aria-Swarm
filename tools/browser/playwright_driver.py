@@ -201,6 +201,43 @@ class PlaywrightPageDriver:
         except Exception:  # noqa: BLE001
             return []
 
+    def click_first_checkbox(self) -> bool:
+        """Click the first visible checkbox (the grid's select-all header) —
+        selecting rows is what reveals the action bar."""
+
+        try:
+            return bool(self.page.evaluate(
+                """() => {
+                    for (const el of document.querySelectorAll(
+                            'input[type=checkbox], [role=checkbox]')) {
+                        const r = el.getBoundingClientRect();
+                        if (r.width === 0 || r.height === 0) continue;
+                        el.click();
+                        return true;
+                    }
+                    return false;
+                }"""))
+        except Exception:  # noqa: BLE001
+            return False
+
+    def visible_button_texts(self, limit: int = 40) -> list:
+        try:
+            return self.page.evaluate(
+                """(limit) => {
+                    const out = [];
+                    for (const el of document.querySelectorAll(
+                            'button, [role=button]')) {
+                        const r = el.getBoundingClientRect();
+                        if (r.width === 0 || r.height === 0) continue;
+                        const t = (el.innerText || '').replace(/\\s+/g, ' ').trim();
+                        if (t && !out.includes(t)) out.push(t.slice(0, 40));
+                        if (out.length >= limit) break;
+                    }
+                    return out;
+                }""", limit)
+        except Exception:  # noqa: BLE001
+            return []
+
     def click_text(self, text: str) -> None:
         """Click the last visible element with this exact text (section
         headings that aren't buttons; input VALUES are not text nodes, so a
