@@ -176,9 +176,9 @@ def _run_check(config, args) -> int:
                             break
                     driver.screenshot("calib-stage2-suggestions")
                     if not report["suggestions_seen"]:
-                        press = getattr(driver, "press_key", lambda k: None)
-                        press("ArrowDown")
-                        press("Enter")
+                        # screenshot-confirmed: the header has an explicit
+                        # Search button next to the box — THE execute trigger
+                        getattr(driver, "click_text", lambda t: None)("Search")
                     # the header counter chips flip non-zero once geography
                     # is applied — that's the proof the search executed
                     counters = []
@@ -212,6 +212,9 @@ def _run_check(config, args) -> int:
                     driver.is_present("filters.apply", timeout_ms=1500)
                     getattr(driver, "fill_labeled_range",
                             lambda *a, **k: None)("Lot Size (SqFt)", 5000, None)
+                    # the lot-size input opens its own suggestion dropdown
+                    # (screenshot-confirmed) — close it before clicking on
+                    getattr(driver, "press_key", lambda k: None)("Escape")
                     driver.screenshot("calib-stage5a-filters-set")
                     driver.click("filters.apply")   # "View Properties"
                     driver.is_present("results.select_all", timeout_ms=9000) \

@@ -32,6 +32,13 @@ selectors:
   search.box:
     by: placeholder
     text: 'Enter County, City, Zip Code(s) or APN #'
+  # The header's explicit Search button (screenshot-confirmed) EXECUTES the
+  # typed geography — typing alone never runs the search. Note: 'Search' text
+  # also exists as the sidebar nav item, so flows click via click_text (last
+  # match in document order = the header button), not this spec directly.
+  search.submit:
+    by: text
+    text: 'Search'
   # top bar reads "Filters | Save | Clear All" — the Filters control opens
   # the filter panel (page text confirms; not a <button>, so anchor by text)
   filters.open:
