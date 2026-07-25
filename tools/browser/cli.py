@@ -164,9 +164,14 @@ def _run_check(config, args) -> int:
                     getattr(driver, "type_keys", lambda t: None)(
                         f"{args.county.title()} County, {args.state.upper()}")
                     driver.is_present("search.suggestion", timeout_ms=3000)
-                    press = getattr(driver, "press_key", lambda k: None)
-                    press("ArrowDown")
-                    press("Enter")
+                    # capture + click the REAL suggestion (any tag/class)
+                    report["suggestions_seen"] = getattr(
+                        driver, "find_and_click_suggestion",
+                        lambda n: [])(f"{args.county.title()} County")
+                    if not report["suggestions_seen"]:
+                        press = getattr(driver, "press_key", lambda k: None)
+                        press("ArrowDown")
+                        press("Enter")
                     # the header counter chips flip non-zero once geography
                     # is applied — that's the proof the search executed
                     counters = []
@@ -230,6 +235,7 @@ def _run_check(config, args) -> int:
     print(f"login          : {report.get('login', 'reused session')}")
     print(f"page           : {(report.get('page') or {}).get('url')}")
     print(f"search typed   : {report.get('search_typed')}")
+    print(f"suggestions    : {report.get('suggestions_seen')}")
     print(f"counters       : {report.get('counters_after_search')}")
     print(f"filters opened : {report.get('filters_opened')}")
     rr = report.get("results_recon") or {}

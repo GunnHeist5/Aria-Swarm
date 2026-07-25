@@ -129,6 +129,46 @@ class PlaywrightPageDriver:
     def press_key(self, key: str) -> None:
         self.page.keyboard.press(key)
 
+    def find_and_click_suggestion(self, needle: str) -> list[dict]:
+        """Find visible elements (any tag) whose own text contains ``needle``
+        — the autocomplete suggestions, wherever and however they render —
+        and JS-click the first plausible one. Returns what was seen, so the
+        calibration can report the real suggestion DOM."""
+
+        seen = self.page.evaluate(
+            """(needle) => {
+                const hits = [];
+                for (const el of document.querySelectorAll('body *')) {
+                    if (el.offsetParent === null) continue;
+                    if (['INPUT','SCRIPT','STYLE'].includes(el.tagName)) continue;
+                    const own = [...el.childNodes]
+                        .filter(n => n.nodeType === 3)
+                        .map(n => n.textContent).join(' ').trim();
+                    if (own.includes(needle) && own.length < 80) {
+                        hits.push({tag: el.tagName.toLowerCase(),
+                                   cls: (el.className||'').toString().slice(0,60),
+                                   text: own.slice(0, 60)});
+                    }
+                }
+                return hits.slice(0, 10);
+            }""", needle)
+        if seen:
+            self.page.evaluate(
+                """(needle) => {
+                    for (const el of document.querySelectorAll('body *')) {
+                        if (el.offsetParent === null) continue;
+                        if (['INPUT','SCRIPT','STYLE'].includes(el.tagName)) continue;
+                        const own = [...el.childNodes]
+                            .filter(n => n.nodeType === 3)
+                            .map(n => n.textContent).join(' ').trim();
+                        if (own.includes(needle) && own.length < 80) {
+                            el.click();
+                            return;
+                        }
+                    }
+                }""", needle)
+        return seen
+
     def header_counters(self) -> list[str]:
         """The dashboard counter chips ('123 MLS', '4,567 Vacant', ...) — all
         zeros means no geography is applied; non-zero proves the county
