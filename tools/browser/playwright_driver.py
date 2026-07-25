@@ -135,38 +135,31 @@ class PlaywrightPageDriver:
         and JS-click the first plausible one. Returns what was seen, so the
         calibration can report the real suggestion DOM."""
 
-        seen = self.page.evaluate(
-            """(needle) => {
-                const hits = [];
-                for (const el of document.querySelectorAll('body *')) {
-                    if (el.offsetParent === null) continue;
-                    if (['INPUT','SCRIPT','STYLE'].includes(el.tagName)) continue;
-                    const own = [...el.childNodes]
-                        .filter(n => n.nodeType === 3)
-                        .map(n => n.textContent).join(' ').trim();
-                    if (own.includes(needle) && own.length < 80) {
-                        hits.push({tag: el.tagName.toLowerCase(),
-                                   cls: (el.className||'').toString().slice(0,60),
-                                   text: own.slice(0, 60)});
-                    }
+        # NOTE: offsetParent is null for position:fixed elements — exactly how
+        # dropdown portals render — so visibility is judged by bounding box.
+        js_scan = """(args) => {
+            const [needle, doClick] = args;
+            const hits = [];
+            for (const el of document.querySelectorAll('body *')) {
+                if (['INPUT','SCRIPT','STYLE'].includes(el.tagName)) continue;
+                const r = el.getBoundingClientRect();
+                if (r.width === 0 || r.height === 0) continue;
+                if (getComputedStyle(el).visibility === 'hidden') continue;
+                const own = [...el.childNodes]
+                    .filter(n => n.nodeType === 3)
+                    .map(n => n.textContent).join(' ').trim();
+                if (own.includes(needle) && own.length < 80) {
+                    hits.push({tag: el.tagName.toLowerCase(),
+                               cls: (el.className||'').toString().slice(0,60),
+                               text: own.slice(0, 60)});
+                    if (doClick) { el.click(); return hits; }
                 }
-                return hits.slice(0, 10);
-            }""", needle)
+            }
+            return hits.slice(0, 10);
+        }"""
+        seen = self.page.evaluate(js_scan, [needle, False])
         if seen:
-            self.page.evaluate(
-                """(needle) => {
-                    for (const el of document.querySelectorAll('body *')) {
-                        if (el.offsetParent === null) continue;
-                        if (['INPUT','SCRIPT','STYLE'].includes(el.tagName)) continue;
-                        const own = [...el.childNodes]
-                            .filter(n => n.nodeType === 3)
-                            .map(n => n.textContent).join(' ').trim();
-                        if (own.includes(needle) && own.length < 80) {
-                            el.click();
-                            return;
-                        }
-                    }
-                }""", needle)
+            self.page.evaluate(js_scan, [needle, True])
         return seen
 
     def header_counters(self) -> list[str]:

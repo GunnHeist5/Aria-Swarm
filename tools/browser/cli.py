@@ -163,11 +163,17 @@ def _run_check(config, args) -> int:
                     driver.click("search.box")
                     getattr(driver, "type_keys", lambda t: None)(
                         f"{args.county.title()} County, {args.state.upper()}")
-                    driver.is_present("search.suggestion", timeout_ms=3000)
-                    # capture + click the REAL suggestion (any tag/class)
-                    report["suggestions_seen"] = getattr(
-                        driver, "find_and_click_suggestion",
-                        lambda n: [])(f"{args.county.title()} County")
+                    # capture + click the REAL suggestion (any tag/class);
+                    # retry a few beats — the dropdown loads from the network
+                    finder = getattr(driver, "find_and_click_suggestion",
+                                     lambda n: [])
+                    report["suggestions_seen"] = []
+                    for _ in range(4):
+                        driver.is_present("search.suggestion", timeout_ms=1500)
+                        report["suggestions_seen"] = finder(
+                            f"{args.county.title()} County")
+                        if report["suggestions_seen"]:
+                            break
                     if not report["suggestions_seen"]:
                         press = getattr(driver, "press_key", lambda k: None)
                         press("ArrowDown")
