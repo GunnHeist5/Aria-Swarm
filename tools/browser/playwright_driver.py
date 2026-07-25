@@ -126,6 +126,24 @@ class PlaywrightPageDriver:
             self.page.keyboard.press("Delete")
             self.page.keyboard.type(str(value), delay=30)
 
+    def press_key(self, key: str) -> None:
+        self.page.keyboard.press(key)
+
+    def header_counters(self) -> list[str]:
+        """The dashboard counter chips ('123 MLS', '4,567 Vacant', ...) — all
+        zeros means no geography is applied; non-zero proves the county
+        search actually executed."""
+
+        try:
+            return self.page.evaluate(
+                """() => [...document.querySelectorAll(
+                       '[class*="HeaderSearchItem"]')]
+                   .filter(e => e.offsetParent !== null)
+                   .map(e => (e.innerText || '').replace(/\\s+/g, ' ').trim())
+                   .filter(Boolean).slice(0, 12)""")
+        except Exception:  # noqa: BLE001
+            return []
+
     def click_text(self, text: str) -> None:
         """Click the last visible element with this exact text (section
         headings that aren't buttons; input VALUES are not text nodes, so a

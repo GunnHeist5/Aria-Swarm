@@ -157,12 +157,27 @@ def _run_check(config, args) -> int:
                         pass
                 try:
                     # the box re-renders on focus (session-generated ids), so
-                    # click it and type via raw keyboard, no locator re-use
+                    # click it and type via raw keyboard, no locator re-use.
+                    # Typing alone does NOT run the search — the autocomplete
+                    # suggestion must be selected (ArrowDown + Enter).
                     driver.click("search.box")
                     getattr(driver, "type_keys", lambda t: None)(
                         f"{args.county.title()} County, {args.state.upper()}")
-                    driver.is_present("filters.open", timeout_ms=3000)
+                    driver.is_present("search.suggestion", timeout_ms=3000)
+                    press = getattr(driver, "press_key", lambda k: None)
+                    press("ArrowDown")
+                    press("Enter")
+                    # the header counter chips flip non-zero once geography
+                    # is applied — that's the proof the search executed
+                    counters = []
+                    for _ in range(10):
+                        driver.is_present("filters.open", timeout_ms=1500)
+                        counters = getattr(driver, "header_counters",
+                                           list)()
+                        if any(not c.startswith("0 ") for c in counters):
+                            break
                     report["search_typed"] = True
+                    report["counters_after_search"] = counters
                 except Exception as exc:  # noqa: BLE001
                     report["search_typed"] = f"FAILED: {exc}"
                 # Open the Filters panel (selectors already calibrated).
@@ -215,6 +230,7 @@ def _run_check(config, args) -> int:
     print(f"login          : {report.get('login', 'reused session')}")
     print(f"page           : {(report.get('page') or {}).get('url')}")
     print(f"search typed   : {report.get('search_typed')}")
+    print(f"counters       : {report.get('counters_after_search')}")
     print(f"filters opened : {report.get('filters_opened')}")
     rr = report.get("results_recon") or {}
     if rr.get("error"):
