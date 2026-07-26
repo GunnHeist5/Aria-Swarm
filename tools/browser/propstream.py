@@ -237,18 +237,21 @@ def run_pull_v2(driver, config: BrowserConfig, county: str, state: str, *,
     driver.click("search.box")
     getattr(driver, "type_keys", lambda t: None)(
         f"{county.title()} County, {state.upper()}")
+    wait = getattr(driver, "wait_ms", lambda ms: None)
     picked = ""
-    for _ in range(4):
-        driver.is_present("search.suggestion", timeout_ms=1500)
+    for _ in range(5):
+        wait(1200)
         picked = getattr(driver, "find_and_click_suggestion",
                          lambda n: [])(f"{county.title()} County")
         if picked:
             break
     if not picked:
         getattr(driver, "click_text", lambda t: None)("Search")
-    # geography proof: header counters leave 0/Loading
-    for _ in range(12):
-        driver.is_present("filters.open", timeout_ms=1500)
+    # geography proof: header counters leave 0/Loading (the search is async
+    # and takes several seconds on a big county — real waits, not selector
+    # probes that return instantly)
+    for _ in range(20):
+        wait(1500)
         counters = getattr(driver, "header_counters", list)()
         live = [c for c in counters
                 if c and not c.startswith("0 ") and "Loading" not in c]
@@ -273,6 +276,7 @@ def run_pull_v2(driver, config: BrowserConfig, county: str, state: str, *,
         getattr(driver, "fill_labeled_range", lambda *a, **k: None)(
             "Lot Size (SqFt)", lot_min_sqft, None)
     getattr(driver, "press_key", lambda k: None)("Tab")
+    wait(2500)  # the View-button count refreshes async after filter edits
 
     # THE GUARD: live count from the View button label, before anything
     # is selected. Fail closed on unreadable/over-cap.
@@ -292,9 +296,10 @@ def run_pull_v2(driver, config: BrowserConfig, county: str, state: str, *,
     # open the results panel and select all (proven: 'N SELECTED' appears)
     getattr(driver, "click_button_containing", lambda w: "")(
         ["View", "Propert"])
-    driver.is_present("results.select_all", timeout_ms=6000)
+    wait(4000)  # results panel loads its first page async
     if not getattr(driver, "click_first_checkbox", lambda: "")():
         raise VerificationError("results select-all checkbox not found")
+    wait(1500)
     if "SELECTED" not in getattr(driver, "page_text", lambda *_: "")(3000):
         raise VerificationError(
             "selection not confirmed (no 'SELECTED' marker) — refusing to "
@@ -304,7 +309,7 @@ def run_pull_v2(driver, config: BrowserConfig, county: str, state: str, *,
     if not getattr(driver, "click_button_containing", lambda w: "")(
             ["Actions"]):
         raise VerificationError("Actions menu button not found")
-    driver.is_present("results.add_to_list", timeout_ms=2000)
+    wait(1200)  # menu animation
     report["actions_menu"] = getattr(driver, "visible_button_texts",
                                      list)(50)
     getattr(driver, "screenshot", lambda *_: "")("pull-v2-actions-menu")

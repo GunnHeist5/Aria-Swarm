@@ -129,6 +129,9 @@ class PlaywrightPageDriver:
     def press_key(self, key: str) -> None:
         self.page.keyboard.press(key)
 
+    def wait_ms(self, ms: int) -> None:
+        self.page.wait_for_timeout(ms)
+
     def click_any_containing(self, words: list) -> str:
         """JS-click the first visible clickable-ish element (button, menu
         item, link, list item) whose own text contains ALL words. Menus in
