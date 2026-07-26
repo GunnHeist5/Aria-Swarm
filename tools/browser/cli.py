@@ -46,7 +46,7 @@ def main(argv: list[str] | None = None) -> int:
         prog="tools.browser.cli",
         description="PropStream browser runner (login -> filter -> export -> inbox).")
     parser.add_argument("command", nargs="?", default="pull",
-                        choices=["pull", "seed-login"])
+                        choices=["pull", "pull-dry", "pull-v2", "seed-login"])
     parser.add_argument("--check", action="store_true",
                         help="calibration sweep: probe every selector, screenshot each")
     parser.add_argument("--county")
@@ -76,6 +76,31 @@ def main(argv: list[str] | None = None) -> int:
 
     if not args.county:
         parser.error("--county is required for a pull")
+
+    if args.command in ("pull-dry", "pull-v2"):
+        import json
+
+        from . import propstream as flow
+        from .session import real_driver, resolve_credentials
+
+        user, pw = resolve_credentials(config)
+        try:
+            with real_driver(config) as driver:
+                report = flow.run_pull_v2(
+                    driver, config, args.county, args.state,
+                    username=user, password=pw,
+                    dry=(args.command == "pull-dry"))
+        except Exception as exc:  # noqa: BLE001
+            print(f"pull-v2 failed: {exc}", file=sys.stderr)
+            return 1
+        print(json.dumps({k: v for k, v in report.items()}, indent=2))
+        if report.get("dry"):
+            print("\nDRY RUN — nothing exported. Actions menu above.")
+            return 0
+        if report.get("downloaded"):
+            print(f"\npulled -> {report['downloaded']} (intake will process it)")
+            return 0
+        return 1
 
     from .hook import pipeline_replenish
 

@@ -129,6 +129,48 @@ class PlaywrightPageDriver:
     def press_key(self, key: str) -> None:
         self.page.keyboard.press(key)
 
+    def click_any_containing(self, words: list) -> str:
+        """JS-click the first visible clickable-ish element (button, menu
+        item, link, list item) whose own text contains ALL words. Menus in
+        this app render items as non-button elements. Returns matched text."""
+
+        try:
+            return self.page.evaluate(
+                """(words) => {
+                    for (const el of document.querySelectorAll(
+                            'button, [role=button], [role=menuitem], a, li, span')) {
+                        const r = el.getBoundingClientRect();
+                        if (r.width === 0 || r.height === 0) continue;
+                        const t = (el.innerText || '').replace(/\\s+/g,' ').trim();
+                        if (t && t.length < 60 && words.every(w =>
+                                t.toLowerCase().includes(w.toLowerCase()))) {
+                            el.click();
+                            return t.slice(0, 60);
+                        }
+                    }
+                    return '';
+                }""", words) or ""
+        except Exception:  # noqa: BLE001
+            return ""
+
+    def download_by_words(self, words: list, dest_dir: str) -> str:
+        """Arm the download listener and JS-click the element matching
+        ``words`` (the CSV/confirm control in an export menu)."""
+
+        import os
+
+        dest_dir = os.path.expanduser(dest_dir)
+        os.makedirs(dest_dir, exist_ok=True)
+        with self.page.expect_download(
+                timeout=self.config.download_timeout_ms) as dl:
+            matched = self.click_any_containing(words)
+            if not matched:
+                raise RuntimeError(f"no element matching {words} to download from")
+        download = dl.value
+        dest = os.path.join(dest_dir, download.suggested_filename)
+        download.save_as(dest)
+        return dest
+
     def click_button_containing(self, words: list) -> str:
         """JS-click the first visible button whose text contains ALL words —
         tolerant of dynamic labels like 'View 28,405 Properties'. Returns the

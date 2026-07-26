@@ -188,3 +188,152 @@ def run_pull(driver: PageDriver, config: BrowserConfig, county: str, state: str,
     skiptrace(driver, config)
     exported = export(driver, config)
     return move_to_inbox(exported, county, state)
+
+
+# ---------------------------------------------------------------------------
+# v2 flow — built from the live calibration of 2026-07-25/26 (every step
+# below was individually proven against the real app; see browser.yaml notes)
+# ---------------------------------------------------------------------------
+
+
+def _count_from_view_button(driver) -> int | None:
+    """'View 200,580 Properties' -> 200580 (the live filtered count)."""
+
+    import re
+
+    texts = getattr(driver, "visible_button_texts", lambda *_: [])(60)
+    for t in texts:
+        m = re.match(r"View\s+([\d,]+)\s+Propert", t or "")
+        if m:
+            return int(m.group(1).replace(",", ""))
+    return None
+
+
+def run_pull_v2(driver, config: BrowserConfig, county: str, state: str, *,
+                username: str, password: str,
+                recipe_steps=(), use_vacant_class: bool = True,
+                lot_min_sqft: int | None = 5000,
+                dry: bool = False, log=print) -> dict:
+    """The calibrated pull. ``dry`` stops at the opened Actions menu —
+    captures its items and commits nothing (a UI row-selection is the only
+    side effect, and it vanishes with the session).
+
+    Fail-closed everywhere: unreadable count, count over max_export_rows,
+    or any missing anchor raises before anything is acted on. Skip trace
+    (REAL MONEY per record) only runs when config.run_skiptrace and only
+    under the same row cap.
+    """
+
+    report = {"county": county, "state": state, "count": None,
+              "actions_menu": [], "downloaded": None, "dry": dry}
+
+    login(driver, config, username, password)
+
+    # deterministic state: clear any persisted geography + filters
+    getattr(driver, "click_any_containing", lambda w: "")(["Clear All"])
+
+    # geography: type + select the autosuggest entry; the header Search
+    # button is the executor fallback (both proven live)
+    driver.click("search.box")
+    getattr(driver, "type_keys", lambda t: None)(
+        f"{county.title()} County, {state.upper()}")
+    picked = ""
+    for _ in range(4):
+        driver.is_present("search.suggestion", timeout_ms=1500)
+        picked = getattr(driver, "find_and_click_suggestion",
+                         lambda n: [])(f"{county.title()} County")
+        if picked:
+            break
+    if not picked:
+        getattr(driver, "click_text", lambda t: None)("Search")
+    # geography proof: header counters leave 0/Loading
+    for _ in range(12):
+        driver.is_present("filters.open", timeout_ms=1500)
+        counters = getattr(driver, "header_counters", list)()
+        live = [c for c in counters
+                if c and not c.startswith("0 ") and "Loading" not in c]
+        if live:
+            break
+    else:
+        raise VerificationError(
+            f"county search never applied for {county}/{state} — counters "
+            "stayed empty; refusing to continue")
+
+    # filters: clean slate, then the recipe
+    driver.click("filters.open")
+    driver.is_present("filters.find", timeout_ms=4000)
+    getattr(driver, "click_any_containing", lambda w: "")(["Clear Filter"])
+    if use_vacant_class:
+        getattr(driver, "click_after_heading", lambda *a: None)(
+            "Property Classification(s)", "Vacant Land")
+    for label, min_v, max_v in recipe_steps:
+        getattr(driver, "fill_labeled_range", lambda *a, **k: None)(
+            label, min_v, max_v)
+    if lot_min_sqft:
+        getattr(driver, "fill_labeled_range", lambda *a, **k: None)(
+            "Lot Size (SqFt)", lot_min_sqft, None)
+    getattr(driver, "press_key", lambda k: None)("Tab")
+
+    # THE GUARD: live count from the View button label, before anything
+    # is selected. Fail closed on unreadable/over-cap.
+    count = _count_from_view_button(driver)
+    report["count"] = count
+    if count is None:
+        raise VerificationError(
+            "could not read the live count from the View ... Properties "
+            "button — refusing to select/export blind")
+    if count > config.max_export_rows:
+        raise VerificationError(
+            f"filtered count {count:,} exceeds max_export_rows "
+            f"{config.max_export_rows:,} — narrow the recipe; refusing to "
+            "mass-select (skip-trace/export cost + ToS guardrail)")
+    log(f"[pull-v2] {county}/{state}: {count:,} properties within cap")
+
+    # open the results panel and select all (proven: 'N SELECTED' appears)
+    getattr(driver, "click_button_containing", lambda w: "")(
+        ["View", "Propert"])
+    driver.is_present("results.select_all", timeout_ms=6000)
+    if not getattr(driver, "click_first_checkbox", lambda: "")():
+        raise VerificationError("results select-all checkbox not found")
+    if "SELECTED" not in getattr(driver, "page_text", lambda *_: "")(3000):
+        raise VerificationError(
+            "selection not confirmed (no 'SELECTED' marker) — refusing to "
+            "proceed to actions")
+
+    # the Actions menu holds Add to List / Skip Trace / Export
+    if not getattr(driver, "click_button_containing", lambda w: "")(
+            ["Actions"]):
+        raise VerificationError("Actions menu button not found")
+    driver.is_present("results.add_to_list", timeout_ms=2000)
+    report["actions_menu"] = getattr(driver, "visible_button_texts",
+                                     list)(50)
+    getattr(driver, "screenshot", lambda *_: "")("pull-v2-actions-menu")
+
+    if dry:
+        log("[pull-v2] DRY RUN — Actions menu captured, nothing acted on")
+        return report
+
+    # skip trace first when enabled (the export then carries contacts)
+    if config.run_skiptrace:
+        matched = getattr(driver, "click_any_containing", lambda w: "")(
+            ["Skip Trace"])
+        if matched:
+            _detect_challenge(driver)
+            if driver.is_present("skiptrace.confirm",
+                                 timeout_ms=config.default_timeout_ms):
+                driver.click("skiptrace.confirm")
+            _verify(driver, "skiptrace", config)
+            # reopen the menu for the export
+            getattr(driver, "click_button_containing", lambda w: "")(
+                ["Actions"])
+
+    # export: menu item, then the CSV/confirm control triggers the download
+    matched = getattr(driver, "click_any_containing", lambda w: "")(["Export"])
+    if not matched:
+        raise VerificationError("Export action not found in the Actions menu")
+    exported = getattr(driver, "download_by_words")(
+        ["CSV"], str(Path(config.download_dir).expanduser()))
+    dest = move_to_inbox(exported, county, state)
+    report["downloaded"] = str(dest)
+    log(f"[pull-v2] exported -> {dest}")
+    return report
