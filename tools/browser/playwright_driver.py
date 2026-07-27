@@ -388,6 +388,100 @@ class PlaywrightPageDriver:
         except Exception:  # noqa: BLE001
             return []
 
+    def watch_dom_start(self) -> None:
+        """Record every element mounted (or class/style-toggled) from now
+        until watch_dom_stop — catches menus that mount and unmount inside
+        a single click, invisible to after-the-fact probes."""
+
+        try:
+            self.page.evaluate(
+                """() => {
+                    window.__added = [];
+                    window.__obs = new MutationObserver(ms => {
+                        if (window.__added.length > 300) return;
+                        for (const m of ms) {
+                            for (const n of (m.addedNodes || [])) {
+                                if (n.nodeType !== 1) continue;
+                                const t = (n.innerText || '')
+                                    .replace(/\\s+/g, ' ').trim();
+                                if (t) window.__added.push(t.slice(0, 200));
+                            }
+                            if (m.type === 'attributes') {
+                                const t = (m.target.innerText || '')
+                                    .replace(/\\s+/g, ' ').trim();
+                                if (t && t.length < 120)
+                                    window.__added.push('attr:' + t);
+                            }
+                        }
+                    });
+                    window.__obs.observe(document.body,
+                        {childList: true, subtree: true, attributes: true,
+                         attributeFilter: ['class', 'style']});
+                }""")
+        except Exception:  # noqa: BLE001
+            pass
+
+    def watch_dom_stop(self, limit: int = 30) -> list:
+        try:
+            return self.page.evaluate(
+                """(limit) => {
+                    if (window.__obs) window.__obs.disconnect();
+                    const out = (window.__added || []).slice(0, limit);
+                    window.__added = [];
+                    return out;
+                }""", limit)
+        except Exception:  # noqa: BLE001
+            return []
+
+    def mouse_down_on(self, css: str) -> bool:
+        """Press (and HOLD) the mouse on an element's center — for menus
+        that only stay open while the button is held."""
+
+        try:
+            box = self.page.locator(css).first.bounding_box()
+            if not box:
+                return False
+            self.page.mouse.move(box["x"] + box["width"] / 2,
+                                 box["y"] + box["height"] / 2)
+            self.page.mouse.down()
+            return True
+        except Exception:  # noqa: BLE001
+            return False
+
+    def mouse_up_neutral(self) -> None:
+        """Release the held button over an inert corner (no item clicked)."""
+
+        try:
+            self.page.mouse.move(2, 2, steps=4)
+            self.page.mouse.up()
+        except Exception:  # noqa: BLE001
+            pass
+
+    def hold_click_menu_item(self, toggle_css: str, item_text: str) -> bool:
+        """press-drag-release: mouse.down on the toggle, drag to the menu
+        item while the menu is held open, release ON the item."""
+
+        try:
+            if not self.mouse_down_on(toggle_css):
+                return False
+            self.page.wait_for_timeout(700)
+            target = self.page.get_by_text(item_text, exact=False).last
+            tb = target.bounding_box()
+            if not tb:
+                self.mouse_up_neutral()
+                return False
+            self.page.mouse.move(tb["x"] + tb["width"] / 2,
+                                 tb["y"] + tb["height"] / 2, steps=8)
+            self.page.wait_for_timeout(250)
+            self.page.mouse.up()
+            return True
+        except Exception:  # noqa: BLE001
+            try:
+                self.page.mouse.up()
+            except Exception:  # noqa: BLE001
+                pass
+            return False
+
     def parent_text_of(self, css: str) -> str:
         """innerText of the matched element's PARENT — dumps a dropdown
         container's real items given its toggle's selector."""

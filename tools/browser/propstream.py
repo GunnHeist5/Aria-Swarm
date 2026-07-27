@@ -408,30 +408,66 @@ def run_pull_v2(driver, config: BrowserConfig, county: str, state: str, *,
     # click, and whatever text is NEW is the menu, whatever it's called.
     snap = getattr(driver, "visible_own_texts", lambda *_: [])
     report["actions_attempts"] = attempts = []
+    toggle_css = '[class*="Results-style"][class*="dropdownToggleBtn"]'
+    hints = ("export", "skip", "trace", "list", "marketing", "save")
+
+    def _menu_hits(texts):
+        return [t for t in texts
+                if any(h in t.lower() for h in hints)]
+
     before = set(snap())
     menu_texts: list = []
-    for _ in range(6):
-        ok = getattr(driver, "real_click_css", lambda c: False)(
-            '[class*="Results-style"][class*="dropdownToggleBtn"]')
+    mode = ""
+    # 1) plain trusted click — menus that stay open after the click
+    for _ in range(3):
+        ok = getattr(driver, "real_click_css", lambda c: False)(toggle_css)
         attempts.append(f"real_click_css:{ok}")
         wait(1500)
-        menu_texts = [t for t in snap() if t not in before]
-        if menu_texts:
+        diff = [t for t in snap() if t not in before]
+        if _menu_hits(diff):
+            menu_texts, mode = diff, "click"
             break
+        if diff:
+            report.setdefault("click_diff_noise", diff[:10])
+    # 2) hold-open probe — menus that mount on mousedown and unmount on the
+    # same click's mouseup; snapshot WHILE the button is held, release over
+    # an inert corner so nothing is triggered. MutationObserver runs in
+    # parallel to catch anything that mounts and dies inside the gesture.
+    if not mode:
+        getattr(driver, "watch_dom_start", lambda: None)()
+        if getattr(driver, "mouse_down_on", lambda c: False)(toggle_css):
+            wait(900)
+            held = [t for t in snap() if t not in before]
+            getattr(driver, "mouse_up_neutral", lambda: None)()
+            attempts.append(f"hold_probe:{len(held)} new texts")
+            if _menu_hits(held):
+                menu_texts, mode = held, "hold"
+        report["dom_mutations"] = getattr(driver, "watch_dom_stop",
+                                          lambda *_: [])(25)
     report["menu_texts"] = menu_texts
+    report["menu_mode"] = mode
     getattr(driver, "screenshot", lambda *_: "")(
-        "pull-v2-actions-menu" if menu_texts else "pull-v2-actions-miss")
-    if not menu_texts:
+        "pull-v2-actions-menu" if mode else "pull-v2-actions-miss")
+    if not mode:
         raise VerificationError(
-            "Actions toggle clicks changed NOTHING on screen (DOM-diff "
-            f"empty after {len(attempts)} clicks) — attempts: {attempts}")
-    log(f"[pull-v2] Actions menu opened — items: {menu_texts}")
+            "Actions menu never surfaced (click diff, hold-open probe and "
+            f"mutation watch all came up empty) — attempts: {attempts} "
+            f"mutations: {report.get('dom_mutations')}")
+    log(f"[pull-v2] Actions menu opened ({mode}) — items: {menu_texts}")
 
     # map the real labels (whatever they are) to the flow's needs
     export_label = next((t for t in menu_texts if "export" in t.lower()), "")
-    skiptrace_label = next((t for t in menu_texts if "skip" in t.lower()), "")
+    skiptrace_label = next((t for t in menu_texts
+                            if "skip" in t.lower()
+                            or "trace" in t.lower()), "")
     report["export_label"] = export_label
     report["skiptrace_label"] = skiptrace_label
+
+    def _menu_click(label: str) -> bool:
+        if mode == "hold":
+            return getattr(driver, "hold_click_menu_item",
+                           lambda c, t: False)(toggle_css, label)
+        return getattr(driver, "real_click_text", lambda t: False)(label)
 
     if dry:
         log("[pull-v2] DRY RUN — menu open, nothing acted on")
@@ -443,26 +479,24 @@ def run_pull_v2(driver, config: BrowserConfig, county: str, state: str, *,
             "the export may live elsewhere (e.g. My Properties lists)")
 
     # skip trace first when enabled (the export then carries contacts) —
-    # trusted click on the DISCOVERED label, not a guessed one
+    # click the DISCOVERED label with the strategy that opened the menu
     if config.run_skiptrace and skiptrace_label:
-        if getattr(driver, "real_click_text", lambda t: False)(
-                skiptrace_label):
+        if _menu_click(skiptrace_label):
             _detect_challenge(driver)
             if driver.is_present("skiptrace.confirm",
                                  timeout_ms=config.default_timeout_ms):
                 driver.click("skiptrace.confirm")
             _verify(driver, "skiptrace", config)
-            # reopen the menu for the export (trusted click on the toggle)
-            getattr(driver, "real_click_css", lambda c: False)(
-                '[class*="Results-style"][class*="dropdownToggleBtn"]')
-            wait(1200)
+            if mode != "hold":  # hold mode reopens the menu per click
+                getattr(driver, "real_click_css", lambda c: False)(toggle_css)
+                wait(1200)
     elif config.run_skiptrace:
         raise VerificationError(
             f"skip trace requested but no skip-ish menu item — {menu_texts}")
 
     # export: the discovered menu item, then the CSV/confirm control
     # triggers the download
-    if not getattr(driver, "real_click_text", lambda t: False)(export_label):
+    if not _menu_click(export_label):
         raise VerificationError(
             f"could not click the export item {export_label!r}")
     exported = getattr(driver, "download_by_words")(
