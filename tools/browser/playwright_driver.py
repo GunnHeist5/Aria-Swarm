@@ -263,6 +263,39 @@ class PlaywrightPageDriver:
         except Exception:  # noqa: BLE001
             return ""
 
+    def click_nth_deep_text(self, words: list, nth_from_end: int = 0) -> str:
+        """Like click_deep_text but clicks the nth match counting from the
+        END of document order (0 = last, the click_deep_text default), and
+        fires hover events first — dropdown toggles can be hover-driven.
+        Returns tag:text ('' when fewer matches exist)."""
+
+        try:
+            return self.page.evaluate(
+                """([words, nth]) => {
+                    const hits = [];
+                    for (const el of document.querySelectorAll('body *')) {
+                        const r = el.getBoundingClientRect();
+                        if (r.width === 0 || r.height === 0) continue;
+                        const t = (el.innerText || '').replace(/\\s+/g,' ').trim();
+                        if (t && t.length < 40 && words.every(w =>
+                                t.toLowerCase().includes(w.toLowerCase())))
+                            hits.push(el);
+                    }
+                    const deep = hits.filter(el =>
+                        !hits.some(m => m !== el && el.contains(m)));
+                    const el = deep[deep.length - 1 - nth];
+                    if (!el) return '';
+                    for (const type of ['pointerover', 'mouseover',
+                                        'mouseenter'])
+                        el.dispatchEvent(new MouseEvent(type, {bubbles: true}));
+                    el.click();
+                    return el.tagName.toLowerCase() + ':' +
+                        (el.innerText || '').replace(/\\s+/g,' ')
+                            .trim().slice(0, 40);
+                }""", [words, nth_from_end]) or ""
+        except Exception:  # noqa: BLE001
+            return ""
+
     def text_probe(self, needle: str, limit: int = 10) -> list:
         """Diagnostic: every element whose OWN text nodes contain ``needle``,
         with tag/class/visibility — pinpoints how a control really renders

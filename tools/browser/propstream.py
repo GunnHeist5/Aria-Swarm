@@ -357,47 +357,41 @@ def run_pull_v2(driver, config: BrowserConfig, county: str, state: str, *,
     report["selected"] = selected
     log(f"[pull-v2] {selected:,} rows selected")
 
-    # The Actions menu holds Add to List / Skip Trace / Export. Proven live:
-    # it is NOT a button/span (the tag-scoped matchers miss it), so the
-    # deep own-text clicker is the primary; retry with real waits, and on a
-    # miss report exactly how 'Actions' renders instead of failing blind.
+    # The Actions dropdown holds Add to List / Skip Trace / Export. Proven
+    # live: it's a bare div AND clicking the last 'Actions'-text match put
+    # no 'Export' in the DOM at all — so a click alone proves nothing (a
+    # grid column header can collide on the text, or the toggle may be
+    # hover-driven). Try each Actions-text element (hover events + click),
+    # newest-mounted first; the ONLY success signal is a visible Export.
+    probe = getattr(driver, "text_probe", lambda *a: [])
+    report["actions_candidates"] = probe("Actions", 8)
     opened = ""
-    for _ in range(6):
-        opened = (getattr(driver, "click_deep_text", lambda w: "")(
-                      ["Actions"])
-                  or getattr(driver, "click_button_containing", lambda w: "")(
-                      ["Actions"])
-                  or getattr(driver, "click_any_containing", lambda w: "")(
-                      ["Actions"]))
+    for _ in range(3):
+        for idx in range(max(1, len(report["actions_candidates"]))):
+            hit = getattr(driver, "click_nth_deep_text",
+                          lambda w, i: "")(["Actions"], idx)
+            if not hit:
+                break
+            wait(1500)
+            if any(e.get("visible") for e in probe("Export", 5)):
+                opened = hit
+                break
         if opened:
             break
         wait(1500)
-    if not opened:
-        probe = getattr(driver, "text_probe", lambda *a: [])("Actions")
-        report["actions_probe"] = probe
-        getattr(driver, "screenshot", lambda *_: "")("pull-v2-actions-miss")
-        raise VerificationError(
-            "Actions menu control not found after selection — elements "
-            f"carrying 'Actions' text: {probe}")
-    log(f"[pull-v2] Actions menu opened via {opened}")
-    wait(1200)  # menu animation
-    # prove the menu ITEMS are present before anything real is clicked —
-    # visible_button_texts/page_text missed them (portal rendering), so
-    # probe each expected item by its own text
-    probe = getattr(driver, "text_probe", lambda *a: [])
     report["menu_items"] = {label: probe(label, 5) for label in
                             ("Export", "Skip Trace", "Add to List")}
+    if not opened:
+        getattr(driver, "screenshot", lambda *_: "")("pull-v2-actions-miss")
+        raise VerificationError(
+            "no Actions click produced a visible 'Export' item — "
+            f"candidates: {report['actions_candidates']}")
+    log(f"[pull-v2] Actions menu opened via {opened} (Export visible)")
     getattr(driver, "screenshot", lambda *_: "")("pull-v2-actions-menu")
 
     if dry:
-        log("[pull-v2] DRY RUN — Actions menu captured, nothing acted on")
+        log("[pull-v2] DRY RUN — Actions menu verified open, nothing acted on")
         return report
-
-    # fail closed if the export item never surfaced in the opened menu
-    if not any(e.get("visible") for e in report["menu_items"]["Export"]):
-        raise VerificationError(
-            "Actions menu opened but no visible 'Export' item — "
-            f"probes: {report['menu_items']}")
 
     # skip trace first when enabled (the export then carries contacts)
     if config.run_skiptrace:
