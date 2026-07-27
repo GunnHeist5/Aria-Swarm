@@ -365,41 +365,53 @@ def run_pull_v2(driver, config: BrowserConfig, county: str, state: str, *,
     # newest-mounted first; the ONLY success signal is a visible Export.
     probe = getattr(driver, "text_probe", lambda *a: [])
     report["actions_candidates"] = probe("Actions", 8)
+    report["actions_attempts"] = attempts = []
+
+    def _export_visible() -> bool:
+        # the JS probe can't pierce shadow DOM — the Playwright check can
+        return (any(e.get("visible") for e in probe("Export", 5))
+                or getattr(driver, "any_text_visible",
+                           lambda t: False)("Export"))
+
     opened = ""
     # calibrated live 2026-07-27: the toggle is div.dropdownToggleBtn and it
     # IGNORES synthetic el.click() — only a trusted pointer sequence opens
     # it, so the real-events click is the primary
     for _ in range(3):
-        if getattr(driver, "real_click_css", lambda c: False)(
-                '[class*="dropdownToggleBtn"]'):
-            wait(1500)
-            if any(e.get("visible") for e in probe("Export", 5)):
-                opened = "dropdownToggleBtn (real click)"
-                break
-        else:
-            wait(1500)
-    for _ in range(3):
+        ok = getattr(driver, "real_click_css", lambda c: False)(
+            '[class*="dropdownToggleBtn"]')
+        attempts.append(f"real_click_css:{ok}")
+        wait(1500)
+        if ok and _export_visible():
+            opened = "dropdownToggleBtn (real click)"
+            break
+    for _ in range(2):
         if opened:
             break
         for idx in range(max(1, len(report["actions_candidates"]))):
             hit = getattr(driver, "click_nth_deep_text",
                           lambda w, i: "")(["Actions"], idx)
+            attempts.append(f"deep_click[{idx}]:{hit or 'miss'}")
             if not hit:
                 break
             wait(1500)
-            if any(e.get("visible") for e in probe("Export", 5)):
+            if _export_visible():
                 opened = hit
                 break
         if opened:
             break
         wait(1500)
-    report["menu_items"] = {label: probe(label, 5) for label in
-                            ("Export", "Skip Trace", "Add to List")}
+    report["menu_items"] = {
+        label: {"probe": probe(label, 5),
+                "locator_visible": getattr(driver, "any_text_visible",
+                                           lambda t: False)(label)}
+        for label in ("Export", "Skip Trace", "Add to List")}
     if not opened:
         getattr(driver, "screenshot", lambda *_: "")("pull-v2-actions-miss")
         raise VerificationError(
             "no Actions click produced a visible 'Export' item — "
-            f"candidates: {report['actions_candidates']}")
+            f"attempts: {attempts} candidates: "
+            f"{report['actions_candidates']}")
     log(f"[pull-v2] Actions menu opened via {opened} (Export visible)")
     getattr(driver, "screenshot", lambda *_: "")("pull-v2-actions-menu")
 

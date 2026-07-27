@@ -274,6 +274,19 @@ class PlaywrightPageDriver:
         except Exception:  # noqa: BLE001
             return False
 
+    def any_text_visible(self, text: str) -> bool:
+        """Is any element containing ``text`` visible — via Playwright's
+        engine, which pierces shadow DOM that the JS scanners can't see."""
+
+        try:
+            loc = self.page.get_by_text(text, exact=False)
+            for i in range(min(loc.count(), 10)):
+                if loc.nth(i).is_visible():
+                    return True
+            return False
+        except Exception:  # noqa: BLE001
+            return False
+
     def real_click_text(self, text: str) -> bool:
         """TRUSTED-events click on the last element containing ``text`` —
         for menu items living in the same synthetic-click-deaf dropdown."""
