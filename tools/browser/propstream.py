@@ -400,19 +400,15 @@ def run_pull_v2(driver, config: BrowserConfig, county: str, state: str, *,
     report["selected"] = selected
     log(f"[pull-v2] {selected:,} rows selected")
 
-    # The Actions dropdown. Proven live: the trusted toggle click LANDS
-    # (panel closed, real pointer events) yet no guessed label ('Export',
-    # 'Skip Trace', 'Add to List') ever appears, and the toggle's parent
-    # holds only the caret — the items portal elsewhere under unknown
-    # labels. So detect the menu by DOM-DIFF: snapshot every visible text,
-    # click, and whatever text is NEW is the menu, whatever it's called.
-    snap = getattr(driver, "visible_own_texts", lambda *_: [])
+    # The Actions dropdown — CALIBRATED 2026-07-27 from its wrapper HTML.
+    # The toggle is div.dropdownToggleBtn whose text is 'Actions'; its
+    # onClick (the ONLY handler) reveals a sibling div.dropdownCard holding
+    # exactly two items: 'Input Range' and 'Save'. There is NO Export or
+    # Skip Trace on the search grid — Save persists the selection to a list
+    # in My Properties, where export + skip trace live. So the grid step is:
+    # open the card, click Save, handle the save/name dialog.
     report["actions_attempts"] = attempts = []
-    hints = ("export", "skip", "trace", "list", "marketing", "save")
 
-    # Aim at the element whose text IS 'Actions' — several dropdownToggleBtn
-    # siblings exist and the bare class selector's .first was a column-filter
-    # toggle (its 'Input Range / Save' popup kept surfacing in mutations).
     def _tag_toggle() -> str:
         if getattr(driver, "tag_element_by_text", lambda *a, **k: False)(
                 '[class*="dropdownToggleBtn"]', "Actions"):
@@ -421,134 +417,60 @@ def run_pull_v2(driver, config: BrowserConfig, county: str, state: str, *,
 
     toggle_css = _tag_toggle()
     report["toggle_css"] = toggle_css
+    card_css = '[class*="dropdownCard"]'
 
-    def _menu_hits(texts):
-        return [t for t in texts
-                if any(h in t.lower() for h in hints)]
-
-    before = set(snap())
-    menu_texts: list = []
-    mode = ""
-    # MutationObserver over the WHOLE battery: a menu that mounts and
-    # unmounts inside one gesture still gets its text recorded.
-    getattr(driver, "watch_dom_start", lambda: None)()
-    # what does the component ACTUALLY listen to? (ends the event guessing)
-    report["react_probe"] = getattr(driver, "react_probe", lambda c: [])(
-        toggle_css)
-    openers = (
-        ("real_click", lambda: getattr(driver, "real_click_css",
-                                       lambda c: False)(toggle_css)),
-        ("react:onClick", lambda: getattr(driver, "react_invoke",
-                                          lambda c, n: "")(toggle_css,
-                                                           "onClick")),
-        ("react:onMouseDown", lambda: getattr(driver, "react_invoke",
-                                              lambda c, n: "")(toggle_css,
-                                                               "onMouseDown")),
-        ("react:onPointerDown", lambda: getattr(
-            driver, "react_invoke", lambda c, n: "")(toggle_css,
-                                                     "onPointerDown")),
-        ("key:Enter", lambda: getattr(driver, "focus_and_key",
-                                      lambda c, k: False)(toggle_css,
-                                                          "Enter")),
-    )
-    for name, attempt in openers:
-        ok = attempt()
-        attempts.append(f"{name}:{ok}")
-        wait(1200)
-        diff = [t for t in snap() if t not in before]
-        if _menu_hits(diff):
-            menu_texts, mode = diff, name
-            break
-        if diff:
-            report.setdefault("diff_noise", diff[:10])
-    # hold-open probe — menus that only live while the button is held;
-    # snapshot mid-gesture, release over an inert corner (nothing triggers)
-    if not mode:
-        if getattr(driver, "mouse_down_on", lambda c: False)(toggle_css):
+    def _open_card() -> bool:
+        for _ in range(4):
+            getattr(driver, "react_invoke", lambda c, n: "")(
+                _tag_toggle(), "onClick")
             wait(900)
-            held = [t for t in snap() if t not in before]
-            getattr(driver, "mouse_up_neutral", lambda: None)()
-            attempts.append(f"hold_probe:{len(held)} new texts")
-            if _menu_hits(held):
-                menu_texts, mode = held, "hold"
-    report["dom_mutations"] = getattr(driver, "watch_dom_stop",
-                                      lambda *_: [])(25)
-    report["menu_texts"] = menu_texts
-    report["menu_mode"] = mode
-    getattr(driver, "screenshot", lambda *_: "")(
-        "pull-v2-actions-menu" if mode else "pull-v2-actions-miss")
-    if not mode:
-        # STRUCTURE dump: fire onClick once more and capture the wrapper's
-        # raw HTML + the tail of <body> (portal mount point) — an empty menu
-        # node is invisible to every text-based instrument above
-        getattr(driver, "react_invoke", lambda c, n: "")(toggle_css,
-                                                         "onClick")
-        wait(1000)
-        report["wrapper_html"] = getattr(driver, "subtree_html",
-                                         lambda *a: "")(
-            '[class*="actionWrapper"]', 2500)
-        report["body_tail"] = getattr(driver, "tail_html", lambda *a: [])(
-            3, 700)
+            html = getattr(driver, "subtree_html", lambda *a: "")(
+                card_css, 400)
+            if html:
+                return True
+        return False
+
+    if not _open_card():
+        getattr(driver, "screenshot", lambda *_: "")("pull-v2-actions-miss")
         raise VerificationError(
-            "Actions onClick runs but no menu text ever appears — "
-            f"wrapper html: {report['wrapper_html']!r} "
-            f"body tail: {report['body_tail']} "
-            f"attempts: {attempts}")
-    log(f"[pull-v2] Actions menu opened ({mode}) — items: {menu_texts}")
+            "Actions card never rendered after onClick — attempts: "
+            f"{attempts}")
+    report["actions_card_html"] = getattr(driver, "subtree_html",
+                                          lambda *a: "")(card_css, 600)
+    log("[pull-v2] Actions card open (items: Input Range, Save)")
 
-    # map the real labels (whatever they are) to the flow's needs
-    export_label = next((t for t in menu_texts if "export" in t.lower()), "")
-    skiptrace_label = next((t for t in menu_texts
-                            if "skip" in t.lower()
-                            or "trace" in t.lower()), "")
-    report["export_label"] = export_label
-    report["skiptrace_label"] = skiptrace_label
-
-    opener_by_name = dict(openers)
-
-    def _menu_click(label: str) -> bool:
-        if mode == "hold":
-            return getattr(driver, "hold_click_menu_item",
-                           lambda c, t: False)(_tag_toggle(), label)
-        if not getattr(driver, "any_text_visible", lambda t: False)(label):
-            opener_by_name.get(mode, lambda: False)()  # reopen the same way
-            wait(1200)
-        return getattr(driver, "real_click_text", lambda t: False)(label)
+    # click 'Save' — the dropdownItem, via its React onClick (the card items
+    # are the same synthetic-click-deaf component family as the toggle)
+    save_css = '[class*="dropdownItem"]'
+    if not getattr(driver, "tag_element_by_text", lambda *a, **k: False)(
+            save_css, "Save", "data-aria-save"):
+        raise VerificationError(
+            "no 'Save' item in the Actions card — card: "
+            f"{report['actions_card_html']!r}")
+    getattr(driver, "screenshot", lambda *_: "")("pull-v2-actions-menu")
 
     if dry:
-        log("[pull-v2] DRY RUN — menu open, nothing acted on")
+        log("[pull-v2] DRY RUN — Actions card open, 'Save' located, "
+            "nothing clicked")
         return report
 
-    if not export_label:
-        raise VerificationError(
-            f"Actions menu has no export-ish item — items: {menu_texts}; "
-            "the export may live elsewhere (e.g. My Properties lists)")
+    before = set(getattr(driver, "visible_own_texts", lambda *_: [])())
+    invoked = getattr(driver, "react_invoke", lambda c, n: "")(
+        '[data-aria-save="1"]', "onClick")
+    attempts.append(f"save_onClick:{invoked}")
+    wait(2000)
+    # capture whatever the Save action surfaced (name dialog / confirmation /
+    # navigation to My Properties) so the next leg can be calibrated
+    save_diff = [t for t in getattr(driver, "visible_own_texts",
+                                    lambda *_: [])() if t not in before]
+    report["after_save"] = save_diff[:25]
+    getattr(driver, "screenshot", lambda *_: "")("pull-v2-after-save")
+    log(f"[pull-v2] Save clicked — new on screen: {save_diff[:15]}")
 
-    # skip trace first when enabled (the export then carries contacts) —
-    # click the DISCOVERED label with the strategy that opened the menu
-    if config.run_skiptrace and skiptrace_label:
-        if _menu_click(skiptrace_label):
-            _detect_challenge(driver)
-            if driver.is_present("skiptrace.confirm",
-                                 timeout_ms=config.default_timeout_ms):
-                driver.click("skiptrace.confirm")
-            _verify(driver, "skiptrace", config)
-            if mode != "hold":  # hold mode reopens the menu per click
-                getattr(driver, "real_click_css", lambda c: False)(
-                    _tag_toggle())  # re-tag: re-renders drop the attribute
-                wait(1200)
-    elif config.run_skiptrace:
-        raise VerificationError(
-            f"skip trace requested but no skip-ish menu item — {menu_texts}")
-
-    # export: the discovered menu item, then the CSV/confirm control
-    # triggers the download
-    if not _menu_click(export_label):
-        raise VerificationError(
-            f"could not click the export item {export_label!r}")
-    exported = getattr(driver, "download_by_words")(
-        ["CSV"], str(Path(config.download_dir).expanduser()))
-    dest = move_to_inbox(exported, county, state)
-    report["downloaded"] = str(dest)
-    log(f"[pull-v2] exported -> {dest}")
-    return report
+    # The export/skip-trace leg lives in My Properties on the saved list and
+    # is not yet calibrated. Stop here with the selection saved (no money
+    # spent) rather than blindly driving an unproven flow.
+    raise VerificationError(
+        "selection SAVED to a list — the export + skip-trace leg in "
+        "My Properties is not yet automated; after-save screen: "
+        f"{report['after_save']}")
