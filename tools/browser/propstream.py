@@ -344,27 +344,41 @@ def run_export_list(driver, config: BrowserConfig, list_name: str, *,
         return report
 
     dest_dir = str(Path(config.download_dir).expanduser())
+    texts = getattr(driver, "visible_own_texts", lambda *_: [])
+    before = set(texts())
     exported = getattr(driver, "try_download_click", lambda *a, **k: "")(
-        "Export", dest_dir, 20000)
+        "Export", dest_dir, 25000)
     if not exported:
-        # the click opened a format/scope dialog instead of downloading
+        # what did the Export click actually put on screen? (DIFF, not a
+        # slice — the sidebar dominates any raw dump)
         wait(2000)
-        report["export_dialog"] = getattr(driver, "visible_own_texts",
-                                          lambda *_: [])()[:25]
-        report["export_dialog_buttons"] = getattr(
-            driver, "visible_button_texts", list)(25)
+        new = [t for t in texts() if t not in before]
+        report["export_dialog"] = new[:25]
+        report["export_dialog_buttons"] = [
+            t for t in getattr(driver, "visible_button_texts", list)(30)
+            if t not in report["toolbar"]]
         getattr(driver, "screenshot", lambda *_: "")("export-dialog")
-        log(f"[export] export dialog: {report['export_dialog'][:12]}")
-        for label in ("CSV", "Download", "Export", "Confirm", "OK"):
+        log(f"[export] after Export click, new on screen: {new[:12]} "
+            f"new buttons: {report['export_dialog_buttons']}")
+        # a big export is generated server-side — it may simply be late
+        exported = getattr(driver, "wait_for_download", lambda *a, **k: "")(
+            dest_dir, 90000)
+        if exported:
+            report["export_via"] = "delayed download"
+    if not exported:
+        # drive whatever the dialog offers: its own new controls first,
+        # then the usual confirm labels
+        for label in (report.get("export_dialog_buttons") or []) + [
+                "CSV", "Download", "Export", "Confirm", "OK", "Yes"]:
             exported = getattr(driver, "try_download_click",
-                               lambda *a, **k: "")(label, dest_dir, 60000)
+                               lambda *a, **k: "")(label, dest_dir, 90000)
             if exported:
                 report["export_via"] = label
                 break
     if not exported:
         raise VerificationError(
-            "Export clicked but no file downloaded — dialog: "
-            f"{report.get('export_dialog')} buttons: "
+            "Export clicked but no file downloaded — new on screen: "
+            f"{report.get('export_dialog')} new buttons: "
             f"{report.get('export_dialog_buttons')}")
     dest = move_to_inbox(exported, county, state)
     report["downloaded"] = str(dest)

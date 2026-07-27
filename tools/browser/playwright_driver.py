@@ -729,6 +729,26 @@ class PlaywrightPageDriver:
         download.save_as(dest)
         return dest
 
+    def wait_for_download(self, dest_dir: str,
+                          timeout_ms: int = 120000) -> str:
+        """Wait for a download that a PREVIOUS click kicked off — a big
+        export is generated server-side and can arrive long after the
+        click. Returns the saved path ('' on timeout). Never raises."""
+
+        import os
+
+        dest_dir = os.path.expanduser(dest_dir)
+        os.makedirs(dest_dir, exist_ok=True)
+        try:
+            with self.page.expect_download(timeout=timeout_ms) as dl:
+                pass
+            download = dl.value
+            dest = os.path.join(dest_dir, download.suggested_filename)
+            download.save_as(dest)
+            return dest
+        except Exception:  # noqa: BLE001
+            return ""
+
     def try_download_click(self, text: str, dest_dir: str,
                            timeout_ms: int = 15000) -> str:
         """Click a control (button-scoped first) with the download listener
