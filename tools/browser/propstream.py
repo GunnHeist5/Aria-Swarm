@@ -316,16 +316,26 @@ def run_export_list(driver, config: BrowserConfig, list_name: str, *,
         raise VerificationError(
             f"saved list {list_name!r} is present but would not open "
             "(no click mechanism worked)")
-    wait(5000)
-    report["list_screen"] = getattr(driver, "visible_own_texts",
-                                    lambda *_: [])()[:30]
+    # wait for the list's property grid to hydrate (the sidebar renders
+    # instantly; the rows are async)
+    for _ in range(10):
+        wait(1500)
+        txt = getattr(driver, "page_text", lambda *_: "")(4000)
+        if "PROPERT" in txt.upper() or "SELECTED" in txt.upper():
+            break
+    report["list_screen"] = getattr(driver, "page_text", lambda *_: "")(1200)
 
     report["selected"] = _select_all_rows(driver, wait, log)
     if not report["selected"]:
         getattr(driver, "screenshot", lambda *_: "")("export-select-miss")
+        report["checkboxes"] = getattr(driver, "css_probe", lambda *a: [])(
+            'input[type=checkbox], [role=checkbox]', 8)
+        report["buttons"] = getattr(driver, "visible_button_texts",
+                                    list)(30)
         raise VerificationError(
-            "select-all never registered on the list view — screen: "
-            f"{report['list_screen']}")
+            "select-all never registered on the list view — page text: "
+            f"{report['list_screen']!r} checkboxes: {report['checkboxes']} "
+            f"buttons: {report['buttons']}")
     log(f"[export] {report['selected']:,} rows selected in {list_name!r}")
 
     report["card_items"] = _open_actions_card(driver, wait)
