@@ -66,3 +66,9 @@ selectors:
   #   Lot Size (SqFt) · Years of Ownership · Assessed Improvement Value ·
   #   Improvement to Tax Value % · Estimated Value · Assessed Land Value
   # These are label-anchored Min/Max pairs (fill_labeled_range), never by id.
+  # --- results view (observed live 2026-07-27) ---
+  # The Actions dropdown toggle. IMPORTANT: ignores synthetic el.click() —
+  # only a trusted Playwright pointer click opens it (real_click_css).
+  results.actions:
+    by: css
+    css: '[class*="dropdownToggleBtn"]'

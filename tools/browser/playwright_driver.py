@@ -263,6 +263,27 @@ class PlaywrightPageDriver:
         except Exception:  # noqa: BLE001
             return ""
 
+    def real_click_css(self, css: str) -> bool:
+        """TRUSTED-events click (full pointer sequence) on the first element
+        matching ``css``. React dropdown toggles that listen on mousedown
+        ignore synthetic el.click() — this is the cure. False on any miss."""
+
+        try:
+            self.page.locator(css).first.click(timeout=6000)
+            return True
+        except Exception:  # noqa: BLE001
+            return False
+
+    def real_click_text(self, text: str) -> bool:
+        """TRUSTED-events click on the last element containing ``text`` —
+        for menu items living in the same synthetic-click-deaf dropdown."""
+
+        try:
+            self.page.get_by_text(text, exact=False).last.click(timeout=6000)
+            return True
+        except Exception:  # noqa: BLE001
+            return False
+
     def click_nth_deep_text(self, words: list, nth_from_end: int = 0) -> str:
         """Like click_deep_text but clicks the nth match counting from the
         END of document order (0 = last, the click_deep_text default), and
@@ -335,6 +356,8 @@ class PlaywrightPageDriver:
         with self.page.expect_download(
                 timeout=self.config.download_timeout_ms) as dl:
             matched = self.click_any_containing(words)
+            if not matched and self.real_click_text(" ".join(words)):
+                matched = "real:" + " ".join(words)
             if not matched:
                 raise RuntimeError(f"no element matching {words} to download from")
         download = dl.value

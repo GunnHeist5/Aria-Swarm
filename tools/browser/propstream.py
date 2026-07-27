@@ -366,7 +366,21 @@ def run_pull_v2(driver, config: BrowserConfig, county: str, state: str, *,
     probe = getattr(driver, "text_probe", lambda *a: [])
     report["actions_candidates"] = probe("Actions", 8)
     opened = ""
+    # calibrated live 2026-07-27: the toggle is div.dropdownToggleBtn and it
+    # IGNORES synthetic el.click() — only a trusted pointer sequence opens
+    # it, so the real-events click is the primary
     for _ in range(3):
+        if getattr(driver, "real_click_css", lambda c: False)(
+                '[class*="dropdownToggleBtn"]'):
+            wait(1500)
+            if any(e.get("visible") for e in probe("Export", 5)):
+                opened = "dropdownToggleBtn (real click)"
+                break
+        else:
+            wait(1500)
+    for _ in range(3):
+        if opened:
+            break
         for idx in range(max(1, len(report["actions_candidates"]))):
             hit = getattr(driver, "click_nth_deep_text",
                           lambda w, i: "")(["Actions"], idx)
@@ -393,9 +407,12 @@ def run_pull_v2(driver, config: BrowserConfig, county: str, state: str, *,
         log("[pull-v2] DRY RUN — Actions menu verified open, nothing acted on")
         return report
 
-    # skip trace first when enabled (the export then carries contacts)
+    # skip trace first when enabled (the export then carries contacts) —
+    # real-events click first: the items share the toggle's dropdown
     if config.run_skiptrace:
-        matched = (getattr(driver, "click_any_containing", lambda w: "")(
+        matched = (getattr(driver, "real_click_text", lambda t: False)(
+                       "Skip Trace")
+                   or getattr(driver, "click_any_containing", lambda w: "")(
                        ["Skip Trace"])
                    or getattr(driver, "click_deep_text", lambda w: "")(
                        ["Skip Trace"]))
@@ -405,16 +422,14 @@ def run_pull_v2(driver, config: BrowserConfig, county: str, state: str, *,
                                  timeout_ms=config.default_timeout_ms):
                 driver.click("skiptrace.confirm")
             _verify(driver, "skiptrace", config)
-            # reopen the menu for the export (same matcher chain as above)
-            (getattr(driver, "click_deep_text", lambda w: "")(["Actions"])
-             or getattr(driver, "click_button_containing", lambda w: "")(
-                 ["Actions"])
-             or getattr(driver, "click_any_containing", lambda w: "")(
-                 ["Actions"]))
+            # reopen the menu for the export (trusted click on the toggle)
+            getattr(driver, "real_click_css", lambda c: False)(
+                '[class*="dropdownToggleBtn"]')
             wait(1200)
 
     # export: menu item, then the CSV/confirm control triggers the download
-    matched = (getattr(driver, "click_any_containing", lambda w: "")(
+    matched = (getattr(driver, "real_click_text", lambda t: False)("Export")
+               or getattr(driver, "click_any_containing", lambda w: "")(
                    ["Export"])
                or getattr(driver, "click_deep_text", lambda w: "")(
                    ["Export"]))
