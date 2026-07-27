@@ -342,6 +342,28 @@ class PlaywrightPageDriver:
         except Exception:  # noqa: BLE001
             return ""
 
+    def css_probe(self, css: str, limit: int = 15) -> list:
+        """Diagnostic: tag/class/text/visibility of every element matching
+        ``css`` — for dumping a menu's real items. Never raises."""
+
+        try:
+            return self.page.evaluate(
+                """([css, limit]) => {
+                    const out = [];
+                    for (const el of document.querySelectorAll(css)) {
+                        const r = el.getBoundingClientRect();
+                        out.push({tag: el.tagName.toLowerCase(),
+                                  cls: String(el.className || '').slice(0, 60),
+                                  text: (el.innerText || '')
+                                      .replace(/\\s+/g, ' ').trim().slice(0, 80),
+                                  visible: r.width > 0 && r.height > 0});
+                        if (out.length >= limit) break;
+                    }
+                    return out;
+                }""", [css, limit])
+        except Exception:  # noqa: BLE001
+            return []
+
     def text_probe(self, needle: str, limit: int = 10) -> list:
         """Diagnostic: every element whose OWN text nodes contain ``needle``,
         with tag/class/visibility — pinpoints how a control really renders

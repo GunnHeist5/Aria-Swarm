@@ -443,11 +443,20 @@ def run_pull_v2(driver, config: BrowserConfig, county: str, state: str, *,
                                            lambda t: False)(label)}
         for label in ("Export", "Skip Trace", "Add to List")}
     if not opened:
+        # last diagnostic: open the menu one more time and dump what the
+        # dropdown ACTUALLY contains — the items may carry labels none of
+        # our guesses match
+        getattr(driver, "real_click_css", lambda c: False)(
+            '[class*="Results-style"][class*="dropdownToggleBtn"]')
+        wait(1500)
+        report["dropdown_dump"] = getattr(driver, "css_probe", lambda *a: [])(
+            '[class*="ropdown"], [role="menu"] *, [class*="Results-style"] li',
+            15)
         getattr(driver, "screenshot", lambda *_: "")("pull-v2-actions-miss")
         raise VerificationError(
             "no Actions click produced a visible 'Export' item — "
-            f"attempts: {attempts} candidates: "
-            f"{report['actions_candidates']}")
+            f"dropdown dump: {report['dropdown_dump']} "
+            f"attempts: {attempts}")
     log(f"[pull-v2] Actions menu opened via {opened} (Export visible)")
     getattr(driver, "screenshot", lambda *_: "")("pull-v2-actions-menu")
 
