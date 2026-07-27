@@ -339,26 +339,36 @@ def run_pull_v2(driver, config: BrowserConfig, county: str, state: str, *,
             "mass-select (skip-trace/export cost + ToS guardrail)")
     log(f"[pull-v2] {county}/{state}: {count:,} properties within cap")
 
-    # Commit the results view. Screenshot-proven: the synthetic View click
-    # left the filters panel OPEN over the results toolbar — the grid loads
-    # behind it (selection even works) but the covered Actions toggle can
-    # never be clicked. Trusted click first, then verify the panel is gone
-    # (Escape is the panel's close key; filters persist server-side).
-    if not getattr(driver, "real_click_regex", lambda p: False)(
-            r"View\s+[\d,]+\s+Propert"):
+    # Commit the results view. Screenshot-proven: the panel left OPEN covers
+    # the results toolbar — the grid loads behind it (selection even works)
+    # but the Actions menu opens underneath the overlay. The open/closed
+    # marker is the panel BODY text ('Lead Lists — Quickly search &
+    # strategize...'): checking the find-input was a false negative, the
+    # panel removes it on its own after the recipe fills.
+    _view_re = r"View\s+[\d,]+\s+Propert"
+    ok_view = getattr(driver, "real_click_regex", lambda p: False)(_view_re)
+    report["view_click"] = ok_view
+    if not ok_view:
         getattr(driver, "click_button_containing", lambda w: "")(
             ["View", "Propert"])
     wait(4000)  # results panel loads its first page async
-    for _ in range(3):
-        if not driver.is_present("filters.find", timeout_ms=1500):
+    _panel_open = lambda: getattr(driver, "any_text_visible",  # noqa: E731
+                                  lambda t: False)(
+        "Quickly search & strategize")
+    for i in range(5):
+        if not _panel_open():
             break
         getattr(driver, "press_key", lambda k: None)("Escape")
-        wait(1000)
+        wait(1200)
+        if i == 1:  # the first View click may have been swallowed — re-kick
+            getattr(driver, "real_click_regex", lambda p: False)(_view_re)
+            wait(3000)
     else:
         getattr(driver, "screenshot", lambda *_: "")("pull-v2-panel-stuck")
         raise VerificationError(
-            "filters panel still covers the results view — refusing to "
-            "click through it")
+            "filters panel still covers the results view (panel body text "
+            "remains visible) — refusing to click through it; "
+            f"view_click={ok_view}")
 
     import re
 
@@ -444,14 +454,17 @@ def run_pull_v2(driver, config: BrowserConfig, county: str, state: str, *,
         for label in ("Export", "Skip Trace", "Add to List")}
     if not opened:
         # last diagnostic: open the menu one more time and dump what the
-        # dropdown ACTUALLY contains — the items may carry labels none of
-        # our guesses match
+        # dropdown ACTUALLY contains — scoped to the toggle's own component
+        # (a broad dump drowned in header/panel elements)
         getattr(driver, "real_click_css", lambda c: False)(
             '[class*="Results-style"][class*="dropdownToggleBtn"]')
         wait(1500)
-        report["dropdown_dump"] = getattr(driver, "css_probe", lambda *a: [])(
-            '[class*="ropdown"], [role="menu"] *, [class*="Results-style"] li',
-            15)
+        report["dropdown_dump"] = {
+            "toggle_parent": getattr(driver, "parent_text_of", lambda c: "")(
+                '[class*="Results-style"][class*="dropdownToggleBtn"]'),
+            "results_dropdown": getattr(driver, "css_probe", lambda *a: [])(
+                '[class*="Results-style"][class*="ropdown"]', 12),
+        }
         getattr(driver, "screenshot", lambda *_: "")("pull-v2-actions-miss")
         raise VerificationError(
             "no Actions click produced a visible 'Export' item — "

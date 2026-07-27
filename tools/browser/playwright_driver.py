@@ -364,6 +364,21 @@ class PlaywrightPageDriver:
         except Exception:  # noqa: BLE001
             return []
 
+    def parent_text_of(self, css: str) -> str:
+        """innerText of the matched element's PARENT — dumps a dropdown
+        container's real items given its toggle's selector."""
+
+        try:
+            return self.page.evaluate(
+                """(css) => {
+                    const el = document.querySelector(css);
+                    if (!el || !el.parentElement) return '';
+                    return (el.parentElement.innerText || '')
+                        .replace(/\\s+/g, ' ').trim().slice(0, 300);
+                }""", css) or ""
+        except Exception:  # noqa: BLE001
+            return ""
+
     def text_probe(self, needle: str, limit: int = 10) -> list:
         """Diagnostic: every element whose OWN text nodes contain ``needle``,
         with tag/class/visibility — pinpoints how a control really renders
