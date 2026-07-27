@@ -534,41 +534,49 @@ def run_pull_v2(driver, config: BrowserConfig, county: str, state: str, *,
         raise VerificationError("could not type the list name into the modal")
     log(f"[pull-v2] naming the list {list_name!r}")
     wait(1200)
-    # a combobox may require picking the 'create new' option it offers
-    options = [t for t in _texts() if t not in before]
-    report["list_options"] = options[:15]
-    for opt in options:
-        low = opt.lower()
-        if list_name.lower() in low or low.startswith("create"):
-            if _click_item(opt):
-                attempts.append(f"picked_option:{opt}")
-                wait(800)
+    # The combobox offers the typed name with a '(Create as New List)' tag —
+    # that OPTION must be picked or Save has nothing selected to save.
+    report["list_options"] = [t for t in _texts() if t not in before][:15]
+    picked = ""
+    for label in ("Create as New List", list_name):
+        if getattr(driver, "real_click_text", lambda t: False)(label):
+            picked = label
             break
+    if not picked:  # comboboxes usually accept Enter as 'take what I typed'
+        getattr(driver, "press_key", lambda k: None)("Enter")
+        picked = "Enter"
+    attempts.append(f"picked:{picked}")
+    wait(1200)
 
-    # the modal's own Save button (scoped by the modal's class)
-    if not getattr(driver, "tag_element_by_text", lambda *a, **k: False)(
-            '[class*="Modal"] button, [class*="modal"] button', "Save",
-            "data-aria-confirm"):
-        raise VerificationError(
-            "no Save button inside the list modal — fields: "
-            f"{report['list_dialog_fields']}")
-    confirmed = (getattr(driver, "real_click_css", lambda c: False)(
-                     '[data-aria-confirm="1"]')
-                 or getattr(driver, "react_invoke", lambda c, n: "")(
-                     '[data-aria-confirm="1"]', "onClick").startswith(
-                         "invoked"))
+    def _save_modal() -> bool:
+        if not getattr(driver, "tag_element_by_text", lambda *a, **k: False)(
+                '[class*="Modal"] button, [class*="modal"] button', "Save",
+                "data-aria-confirm"):
+            return False
+        return bool(getattr(driver, "real_click_css", lambda c: False)(
+                        '[data-aria-confirm="1"]')
+                    or getattr(driver, "react_invoke", lambda c, n: "")(
+                        '[data-aria-confirm="1"]',
+                        "onClick").startswith("invoked"))
+
+    # the modal CLOSING is the only success signal
+    _open = lambda: getattr(driver, "any_text_visible",  # noqa: E731
+                            lambda t: False)("Skip Trace Selected Properties")
+    confirmed = _save_modal()
     attempts.append(f"modal_save:{confirmed}")
     wait(3500)
+    if _open():  # second pass: re-affirm the option, then Save again
+        getattr(driver, "press_key", lambda k: None)("Enter")
+        wait(800)
+        attempts.append(f"modal_save_retry:{_save_modal()}")
+        wait(3500)
     report["after_list_save"] = [t for t in _texts() if t not in before][:25]
     getattr(driver, "screenshot", lambda *_: "")("pull-v2-list-saved")
-    # the modal closing is the success signal
-    still_open = getattr(driver, "any_text_visible", lambda t: False)(
-        "Add to Marketing List")
-    report["list_saved"] = bool(confirmed) and not still_open
+    report["list_saved"] = not _open()
     if not report["list_saved"]:
         raise VerificationError(
             "list modal did not close after Save — screen: "
-            f"{report['after_list_save']}")
+            f"{report['after_list_save']} attempts: {attempts}")
     log(f"[pull-v2] SAVED {selected:,} properties to list {list_name!r}")
 
     # The CSV export lives in My Properties on the saved list and is not
