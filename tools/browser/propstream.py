@@ -216,6 +216,26 @@ def _count_from_view_button(driver) -> int | None:
     return None
 
 
+def _click_text_robust(driver, text: str, wait=None) -> str:
+    """Click an element by its text through every proven mechanism: trusted
+    click, then tag-the-deepest + trusted click on the marker, then the
+    React onClick of the marker's nearest handler-bearing ancestor.
+    Returns which one worked ('' if none)."""
+
+    if getattr(driver, "real_click_text", lambda t: False)(text):
+        return "real_click_text"
+    if getattr(driver, "tag_deepest_by_text", lambda *a: False)(
+            text, "data-aria-hit"):
+        if getattr(driver, "real_click_css", lambda c: False)(
+                '[data-aria-hit="1"]'):
+            return "tagged_click"
+        res = getattr(driver, "react_invoke", lambda c, n: "")(
+            '[data-aria-hit="1"]', "onClick")
+        if res.startswith("invoked"):
+            return res
+    return ""
+
+
 def _tag_actions_toggle(driver) -> str:
     """Marker selector for the element whose text IS 'Actions' (several
     dropdownToggleBtn siblings exist). Re-tag after every re-render."""
@@ -280,16 +300,22 @@ def run_export_list(driver, config: BrowserConfig, list_name: str, *,
     for note in (getattr(driver, "dismiss_modals", list)() or []):
         log(f"[export] dismissed overlay: {note}")
 
-    if not getattr(driver, "real_click_text", lambda t: False)(
-            "My Properties"):
+    if not _click_text_robust(driver, "My Properties"):
         raise VerificationError("could not reach My Properties")
     wait(5000)
     report["screen"] = getattr(driver, "visible_own_texts", lambda *_: [])()[:30]
-
-    if not getattr(driver, "real_click_text", lambda t: False)(list_name):
+    if list_name not in report["screen"]:
         raise VerificationError(
-            f"saved list {list_name!r} not found in My Properties — screen: "
-            f"{report['screen']}")
+            f"saved list {list_name!r} is not in My Properties — lists on "
+            f"screen: {report['screen']}")
+
+    how = _click_text_robust(driver, list_name)
+    report["list_click"] = how
+    if not how:
+        getattr(driver, "screenshot", lambda *_: "")("export-list-click-miss")
+        raise VerificationError(
+            f"saved list {list_name!r} is present but would not open "
+            "(no click mechanism worked)")
     wait(5000)
     report["list_screen"] = getattr(driver, "visible_own_texts",
                                     lambda *_: [])()[:30]
