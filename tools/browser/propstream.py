@@ -230,6 +230,12 @@ def run_pull_v2(driver, config: BrowserConfig, county: str, state: str, *,
 
     login(driver, config, username, password)
 
+    def _clear_overlays():
+        for note in (getattr(driver, "dismiss_modals", list)() or []):
+            log(f"[pull-v2] dismissed overlay: {note}")
+
+    _clear_overlays()  # announcement/promo modals swallow pointer clicks
+
     # deterministic state: clear any persisted geography + filters
     getattr(driver, "click_any_containing", lambda w: "")(["Clear All"])
 
@@ -263,8 +269,16 @@ def run_pull_v2(driver, config: BrowserConfig, county: str, state: str, *,
             f"county search never applied for {county}/{state} — counters "
             "stayed empty; refusing to continue")
 
-    # filters: clean slate, then the recipe
-    driver.click("filters.open")
+    # filters: clean slate, then the recipe. A modal can appear AFTER the
+    # search executes (observed live) — dismiss, and fall back to a JS
+    # click (interception-immune) if the locator click is still blocked.
+    _clear_overlays()
+    try:
+        driver.click("filters.open")
+    except Exception:  # noqa: BLE001
+        _clear_overlays()
+        if not getattr(driver, "click_deep_text", lambda w: "")(["Filters"]):
+            raise
     driver.is_present("filters.find", timeout_ms=4000)
     getattr(driver, "click_any_containing", lambda w: "")(["Clear Filter"])
     if use_vacant_class:

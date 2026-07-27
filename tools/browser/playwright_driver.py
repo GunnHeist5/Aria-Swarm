@@ -156,6 +156,63 @@ class PlaywrightPageDriver:
         except Exception:  # noqa: BLE001
             return ""
 
+    def dismiss_modals(self) -> list:
+        """Close any blocking overlay dialog (announcement, promo, the
+        single-session Proceed) that would intercept pointer clicks —
+        observed live: a Modal-style overlay swallowed the Filters click.
+        Clicks the dialog's own affirmative/close control via JS (immune to
+        interception); Escape as last resort. Returns what it clicked."""
+
+        done = []
+        for _ in range(3):
+            try:
+                acted = self.page.evaluate(
+                    """() => {
+                        const modal = [...document.querySelectorAll(
+                                '[class*="odal"], [role=dialog]')]
+                            .find(el => {
+                                const r = el.getBoundingClientRect();
+                                return r.width > 0 && r.height > 0;
+                            });
+                        if (!modal) return '';
+                        const byText = (words) =>
+                            [...modal.querySelectorAll(
+                                'button, [role=button], a, span, div')]
+                            .find(el => {
+                                const t = (el.innerText || '')
+                                    .replace(/\\s+/g, ' ').trim().toLowerCase();
+                                return t && t.length < 30 && words.some(w =>
+                                    w.length <= 2 ? t === w : t.includes(w));
+                            });
+                        const el =
+                            byText(['proceed']) ||
+                            modal.querySelector(
+                                '[aria-label*="lose"], [class*="close" i]') ||
+                            byText(['got it', 'no thanks', 'maybe later',
+                                    'dismiss', 'skip', 'close', 'ok',
+                                    '\\u00d7', 'x']);
+                        if (!el) return 'modal-no-button';
+                        el.click();
+                        return ((el.innerText ||
+                                 el.getAttribute('aria-label') ||
+                                 el.className || 'clicked')
+                                .toString().replace(/\\s+/g, ' ')
+                                .trim().slice(0, 40));
+                    }""") or ""
+            except Exception:  # noqa: BLE001
+                acted = ""
+            if not acted:
+                break
+            done.append(acted)
+            if acted == "modal-no-button":
+                try:
+                    self.page.keyboard.press("Escape")
+                except Exception:  # noqa: BLE001
+                    pass
+                done.append("Escape")
+            self.page.wait_for_timeout(800)
+        return done
+
     def click_deep_text(self, words: list) -> str:
         """JS-click the DEEPEST visible element (any tag) whose text contains
         ALL words — catches controls rendered as bare divs, which the
