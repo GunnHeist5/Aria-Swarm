@@ -216,6 +216,135 @@ def _count_from_view_button(driver) -> int | None:
     return None
 
 
+def _tag_actions_toggle(driver) -> str:
+    """Marker selector for the element whose text IS 'Actions' (several
+    dropdownToggleBtn siblings exist). Re-tag after every re-render."""
+
+    if getattr(driver, "tag_element_by_text", lambda *a, **k: False)(
+            '[class*="dropdownToggleBtn"]', "Actions"):
+        return '[data-aria-target="1"]'
+    return '[class*="dropdownToggleBtn"]'
+
+
+def _open_actions_card(driver, wait) -> list:
+    """Fire the toggle's onClick (its only handler) until the sibling
+    dropdownCard mounts; returns the card's item texts."""
+
+    for _ in range(4):
+        getattr(driver, "react_invoke", lambda c, n: "")(
+            _tag_actions_toggle(driver), "onClick")
+        wait(900)
+        items = [e.get("text", "") for e in
+                 getattr(driver, "css_probe", lambda *a: [])(
+                     '[class*="dropdownItem"]', 12)
+                 if e.get("visible")]
+        if items:
+            return items
+    return []
+
+
+def _select_all_rows(driver, wait, log) -> int:
+    """Click the grid's select-all and poll the 'N SELECTED' counter until
+    it leaves zero. Returns the selected count (0 = never registered)."""
+
+    import re
+
+    if not getattr(driver, "click_first_checkbox", lambda: "")():
+        return 0
+    for attempt in range(10):
+        wait(1500)
+        m = re.search(r"([\d,]+)\s+SELECTED",
+                      getattr(driver, "page_text", lambda *_: "")(4000))
+        if m and int(m.group(1).replace(",", "")):
+            return int(m.group(1).replace(",", ""))
+        if attempt == 4:
+            getattr(driver, "click_first_checkbox", lambda: "")()
+    return 0
+
+
+def run_export_list(driver, config: BrowserConfig, list_name: str, *,
+                    username: str, password: str, county: str = "harris",
+                    state: str = "tx", dry: bool = False, log=print) -> dict:
+    """My Properties -> open a saved list -> select all -> Actions -> export
+    the CSV into the leads inbox.
+
+    ``dry`` stops once the list's Actions card is open, reporting its real
+    items — nothing is clicked, nothing billable happens.
+    """
+
+    report = {"list_name": list_name, "selected": 0, "card_items": [],
+              "downloaded": None, "dry": dry}
+    wait = getattr(driver, "wait_ms", lambda ms: None)
+
+    login(driver, config, username, password)
+    for note in (getattr(driver, "dismiss_modals", list)() or []):
+        log(f"[export] dismissed overlay: {note}")
+
+    if not getattr(driver, "real_click_text", lambda t: False)(
+            "My Properties"):
+        raise VerificationError("could not reach My Properties")
+    wait(5000)
+    report["screen"] = getattr(driver, "visible_own_texts", lambda *_: [])()[:30]
+
+    if not getattr(driver, "real_click_text", lambda t: False)(list_name):
+        raise VerificationError(
+            f"saved list {list_name!r} not found in My Properties — screen: "
+            f"{report['screen']}")
+    wait(5000)
+    report["list_screen"] = getattr(driver, "visible_own_texts",
+                                    lambda *_: [])()[:30]
+
+    report["selected"] = _select_all_rows(driver, wait, log)
+    if not report["selected"]:
+        getattr(driver, "screenshot", lambda *_: "")("export-select-miss")
+        raise VerificationError(
+            "select-all never registered on the list view — screen: "
+            f"{report['list_screen']}")
+    log(f"[export] {report['selected']:,} rows selected in {list_name!r}")
+
+    report["card_items"] = _open_actions_card(driver, wait)
+    getattr(driver, "screenshot", lambda *_: "")("export-actions-card")
+    if not report["card_items"]:
+        raise VerificationError("Actions card never opened on the list view")
+    log(f"[export] Actions card: {report['card_items']}")
+
+    if dry:
+        log("[export] DRY RUN — card open, nothing clicked")
+        return report
+
+    export_label = next((t for t in report["card_items"]
+                         if "export" in t.lower()), "")
+    if not export_label:
+        raise VerificationError(
+            f"no export item in the list's Actions card: {report['card_items']}")
+
+    # the export click may download directly or open a format dialog
+    dest_dir = str(Path(config.download_dir).expanduser())
+    try:
+        exported = getattr(driver, "download_by_text")(export_label, dest_dir)
+    except Exception:  # noqa: BLE001 — a dialog stands between click and file
+        getattr(driver, "real_click_text", lambda t: False)(export_label)
+        wait(2500)
+        report["export_dialog"] = getattr(driver, "visible_own_texts",
+                                          lambda *_: [])()[:25]
+        getattr(driver, "screenshot", lambda *_: "")("export-dialog")
+        exported = ""
+        for label in ("CSV", "Export", "Download", "Confirm"):
+            try:
+                exported = getattr(driver, "download_by_text")(label, dest_dir)
+                break
+            except Exception:  # noqa: BLE001
+                continue
+        if not exported:
+            raise VerificationError(
+                "export clicked but no download started — dialog: "
+                f"{report.get('export_dialog')}")
+    dest = move_to_inbox(exported, county, state)
+    report["downloaded"] = str(dest)
+    log(f"[export] downloaded -> {dest}")
+    return report
+
+
 def run_pull_v2(driver, config: BrowserConfig, county: str, state: str, *,
                 username: str, password: str,
                 recipe_steps=(), use_vacant_class: bool = True,

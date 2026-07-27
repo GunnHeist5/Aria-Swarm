@@ -729,6 +729,23 @@ class PlaywrightPageDriver:
         download.save_as(dest)
         return dest
 
+    def download_by_text(self, text: str, dest_dir: str) -> str:
+        """Arm the download listener and trusted-click the element whose
+        text contains ``text`` — the export/CSV controls."""
+
+        import os
+
+        dest_dir = os.path.expanduser(dest_dir)
+        os.makedirs(dest_dir, exist_ok=True)
+        with self.page.expect_download(
+                timeout=self.config.download_timeout_ms) as dl:
+            if not self.real_click_text(text):
+                raise RuntimeError(f"no clickable element matching {text!r}")
+        download = dl.value
+        dest = os.path.join(dest_dir, download.suggested_filename)
+        download.save_as(dest)
+        return dest
+
     def click_button_containing(self, words: list) -> str:
         """JS-click the first visible button whose text contains ALL words —
         tolerant of dynamic labels like 'View 28,405 Properties'. Returns the
