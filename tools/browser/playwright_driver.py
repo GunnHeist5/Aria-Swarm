@@ -42,6 +42,17 @@ class PlaywrightPageDriver:
         self.selectors = selectors
         self.config = config
         self._subs = {"property_class": config.property_class}
+        # PropStream pops 'Information' announcement modals at unpredictable
+        # moments and they intercept pointer events (observed live, twice at
+        # different flow stages). Auto-dismiss: Playwright re-runs this
+        # handler whenever the caption is visible during any locator action.
+        try:
+            self.page.add_locator_handler(
+                self.page.locator('[class*="defaultCaption"]').first,
+                lambda *_: self.dismiss_modals(),
+                no_wait_after=True)
+        except Exception:  # noqa: BLE001
+            pass
 
     def _loc(self, key: str):
         spec = self.selectors.get(key)
@@ -168,12 +179,21 @@ class PlaywrightPageDriver:
             try:
                 acted = self.page.evaluate(
                     """() => {
-                        const modal = [...document.querySelectorAll(
+                        const all = [...document.querySelectorAll(
                                 '[class*="odal"], [role=dialog]')]
-                            .find(el => {
+                            .filter(el => {
                                 const r = el.getBoundingClientRect();
                                 return r.width > 0 && r.height > 0;
                             });
+                        // prefer the dialog carrying a caption (the
+                        // 'Information' popup) over other modal-ish
+                        // containers (e.g. the filters panel — whose
+                        // chip-remove X buttons must never be clicked);
+                        // last match = the most recently mounted dialog
+                        const withCap = all.filter(el =>
+                            el.querySelector('[class*="defaultCaption"]'));
+                        const pool = withCap.length ? withCap : all;
+                        const modal = pool[pool.length - 1];
                         if (!modal) return '';
                         const byText = (words) =>
                             [...modal.querySelectorAll(
