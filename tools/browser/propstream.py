@@ -312,16 +312,26 @@ def run_pull_v2(driver, config: BrowserConfig, county: str, state: str, *,
         getattr(driver, "fill_labeled_range", lambda *a, **k: None)(
             "Lot Size (SqFt)", lot_min_sqft, None)
     getattr(driver, "press_key", lambda k: None)("Tab")
-    wait(2500)  # the View-button count refreshes async after filter edits
-
-    # THE GUARD: live count from the View button label, before anything
-    # is selected. Fail closed on unreadable/over-cap.
-    count = _count_from_view_button(driver)
+    # THE GUARD: live count from the View button label, before anything is
+    # selected. The label refreshes async after every filter edit (and can
+    # briefly show the pre-filter count), so poll until two consecutive
+    # reads agree. Fail closed on unreadable/over-cap.
+    count = prev = None
+    for _ in range(12):
+        wait(1500)
+        cur = _count_from_view_button(driver)
+        if cur is not None and cur == prev:
+            count = cur
+            break
+        prev = cur
     report["count"] = count
     if count is None:
+        report["buttons_seen"] = getattr(driver, "visible_button_texts",
+                                         list)(40)
         raise VerificationError(
-            "could not read the live count from the View ... Properties "
-            "button — refusing to select/export blind")
+            "could not read a stable live count from the View ... "
+            "Properties button — refusing to select/export blind; "
+            f"buttons seen: {report['buttons_seen']}")
     if count > config.max_export_rows:
         raise VerificationError(
             f"filtered count {count:,} exceeds max_export_rows "
