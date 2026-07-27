@@ -297,6 +297,18 @@ class PlaywrightPageDriver:
         except Exception:  # noqa: BLE001
             return False
 
+    def real_click_regex(self, pattern: str) -> bool:
+        """TRUSTED-events click matched by regex — for controls whose label
+        carries live data (e.g. 'View 4,933 Properties')."""
+
+        import re
+
+        try:
+            self.page.get_by_text(re.compile(pattern)).last.click(timeout=6000)
+            return True
+        except Exception:  # noqa: BLE001
+            return False
+
     def click_nth_deep_text(self, words: list, nth_from_end: int = 0) -> str:
         """Like click_deep_text but clicks the nth match counting from the
         END of document order (0 = last, the click_deep_text default), and

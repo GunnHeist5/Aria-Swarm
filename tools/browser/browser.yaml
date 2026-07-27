@@ -67,8 +67,13 @@ selectors:
   #   Improvement to Tax Value % · Estimated Value · Assessed Land Value
   # These are label-anchored Min/Max pairs (fill_labeled_range), never by id.
   # --- results view (observed live 2026-07-27) ---
-  # The Actions dropdown toggle. IMPORTANT: ignores synthetic el.click() —
-  # only a trusted Playwright pointer click opens it (real_click_css).
+  # The Actions dropdown toggle (class src-app-Search-Results-style__*__
+  # dropdownToggleBtn). IMPORTANT: ignores synthetic el.click() — only a
+  # trusted Playwright pointer click opens it (real_click_css). Scoped to
+  # Results-style because header dropdowns (Saved Searches) share the
+  # toggle component. ALSO: the 'View N Properties' click must be a real
+  # click too, or the filters panel stays open COVERING this toolbar
+  # (screenshot-proven 2026-07-27).
   results.actions:
     by: css
-    css: '[class*="dropdownToggleBtn"]'
+    css: '[class*="Results-style"][class*="dropdownToggleBtn"]'

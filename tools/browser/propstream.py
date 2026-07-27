@@ -55,6 +55,13 @@ def login(driver: PageDriver, config: BrowserConfig, username: str,
         driver.click("consent.accept")
     _detect_challenge(driver)
 
+    # a still-valid session redirects login -> app; don't demand the form
+    # when it never renders (observed live: slow app load misses the 4s
+    # app.ready check above, then the login page bounces straight back)
+    if not driver.is_present("login.username", timeout_ms=6000):
+        if driver.is_present("app.ready", timeout_ms=10_000):
+            return
+
     step(driver, "login.username",
          lambda: driver.fill("login.username", username))
     step(driver, "login.password",
@@ -322,10 +329,26 @@ def run_pull_v2(driver, config: BrowserConfig, county: str, state: str, *,
             "mass-select (skip-trace/export cost + ToS guardrail)")
     log(f"[pull-v2] {county}/{state}: {count:,} properties within cap")
 
-    # open the results panel and select all (proven: 'N SELECTED' appears)
-    getattr(driver, "click_button_containing", lambda w: "")(
-        ["View", "Propert"])
+    # Commit the results view. Screenshot-proven: the synthetic View click
+    # left the filters panel OPEN over the results toolbar — the grid loads
+    # behind it (selection even works) but the covered Actions toggle can
+    # never be clicked. Trusted click first, then verify the panel is gone
+    # (Escape is the panel's close key; filters persist server-side).
+    if not getattr(driver, "real_click_regex", lambda p: False)(
+            r"View\s+[\d,]+\s+Propert"):
+        getattr(driver, "click_button_containing", lambda w: "")(
+            ["View", "Propert"])
     wait(4000)  # results panel loads its first page async
+    for _ in range(3):
+        if not driver.is_present("filters.find", timeout_ms=1500):
+            break
+        getattr(driver, "press_key", lambda k: None)("Escape")
+        wait(1000)
+    else:
+        getattr(driver, "screenshot", lambda *_: "")("pull-v2-panel-stuck")
+        raise VerificationError(
+            "filters panel still covers the results view — refusing to "
+            "click through it")
 
     import re
 
@@ -377,13 +400,16 @@ def run_pull_v2(driver, config: BrowserConfig, county: str, state: str, *,
     # calibrated live 2026-07-27: the toggle is div.dropdownToggleBtn and it
     # IGNORES synthetic el.click() — only a trusted pointer sequence opens
     # it, so the real-events click is the primary
-    for _ in range(3):
-        ok = getattr(driver, "real_click_css", lambda c: False)(
-            '[class*="dropdownToggleBtn"]')
-        attempts.append(f"real_click_css:{ok}")
-        wait(1500)
-        if ok and _export_visible():
-            opened = "dropdownToggleBtn (real click)"
+    for css in ('[class*="Results-style"][class*="dropdownToggleBtn"]',
+                '[class*="dropdownToggleBtn"]'):
+        for _ in range(3):
+            ok = getattr(driver, "real_click_css", lambda c: False)(css)
+            attempts.append(f"real_click_css({css}):{ok}")
+            wait(1500)
+            if ok and _export_visible():
+                opened = "dropdownToggleBtn (real click)"
+                break
+        if opened:
             break
     for _ in range(2):
         if opened:
@@ -436,7 +462,7 @@ def run_pull_v2(driver, config: BrowserConfig, county: str, state: str, *,
             _verify(driver, "skiptrace", config)
             # reopen the menu for the export (trusted click on the toggle)
             getattr(driver, "real_click_css", lambda c: False)(
-                '[class*="dropdownToggleBtn"]')
+                '[class*="Results-style"][class*="dropdownToggleBtn"]')
             wait(1200)
 
     # export: menu item, then the CSV/confirm control triggers the download
