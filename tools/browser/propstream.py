@@ -282,28 +282,24 @@ def _select_all_rows(driver, wait, log) -> int:
     return 0
 
 
-def run_export_list(driver, config: BrowserConfig, list_name: str, *,
-                    username: str, password: str, county: str = "harris",
-                    state: str = "tx", dry: bool = False, log=print) -> dict:
-    """My Properties -> open a saved list -> select all -> Actions -> export
-    the CSV into the leads inbox.
+def _open_saved_list(driver, config: BrowserConfig, list_name: str, *,
+                     username: str, password: str, report: dict,
+                     log=print) -> None:
+    """login -> My Properties -> open the named list -> wait for its grid.
+    Shared by the export and skip-trace flows; fails closed with the lists
+    actually on screen."""
 
-    ``dry`` stops once the list's Actions card is open, reporting its real
-    items — nothing is clicked, nothing billable happens.
-    """
-
-    report = {"list_name": list_name, "selected": 0, "card_items": [],
-              "downloaded": None, "dry": dry}
     wait = getattr(driver, "wait_ms", lambda ms: None)
 
     login(driver, config, username, password)
     for note in (getattr(driver, "dismiss_modals", list)() or []):
-        log(f"[export] dismissed overlay: {note}")
+        log(f"[list] dismissed overlay: {note}")
 
     if not _click_text_robust(driver, "My Properties"):
         raise VerificationError("could not reach My Properties")
     wait(5000)
-    report["screen"] = getattr(driver, "visible_own_texts", lambda *_: [])()[:30]
+    report["screen"] = getattr(driver, "visible_own_texts",
+                               lambda *_: [])()[:30]
     if list_name not in report["screen"]:
         raise VerificationError(
             f"saved list {list_name!r} is not in My Properties — lists on "
@@ -312,18 +308,91 @@ def run_export_list(driver, config: BrowserConfig, list_name: str, *,
     how = _click_text_robust(driver, list_name)
     report["list_click"] = how
     if not how:
-        getattr(driver, "screenshot", lambda *_: "")("export-list-click-miss")
+        getattr(driver, "screenshot", lambda *_: "")("list-click-miss")
         raise VerificationError(
             f"saved list {list_name!r} is present but would not open "
             "(no click mechanism worked)")
-    # wait for the list's property grid to hydrate (the sidebar renders
-    # instantly; the rows are async)
+    # the sidebar renders instantly; the property rows are async
     for _ in range(10):
         wait(1500)
         txt = getattr(driver, "page_text", lambda *_: "")(4000)
         if "PROPERT" in txt.upper() or "SELECTED" in txt.upper():
             break
     report["list_screen"] = getattr(driver, "page_text", lambda *_: "")(1200)
+    report["toolbar"] = getattr(driver, "visible_button_texts", list)(30)
+
+
+def run_skiptrace_list(driver, config: BrowserConfig, list_name: str, *,
+                       username: str, password: str, dry: bool = False,
+                       log=print) -> dict:
+    """My Properties -> saved list -> Skip Trace the whole list (fills the
+    Mobile/Landline/Email columns the export otherwise leaves blank).
+
+    ``dry`` stops at the confirm dialog with its contents reported — the
+    click that starts (and bills) the trace never happens.
+    """
+
+    report = {"list_name": list_name, "dry": dry, "started": False}
+    wait = getattr(driver, "wait_ms", lambda ms: None)
+    texts = getattr(driver, "visible_own_texts", lambda *_: [])
+
+    _open_saved_list(driver, config, list_name, username=username,
+                     password=password, report=report, log=log)
+    if not any("skip trace" in t.lower() for t in report["toolbar"]):
+        raise VerificationError(
+            f"no Skip Trace control on the list view — toolbar: "
+            f"{report['toolbar']}")
+
+    before = set(texts())
+    if not _click_text_robust(driver, "Skip Trace"):
+        raise VerificationError("could not click Skip Trace")
+    wait(3000)
+    _detect_challenge(driver)
+    report["dialog"] = [t for t in texts() if t not in before][:25]
+    report["dialog_buttons"] = [
+        t for t in getattr(driver, "visible_button_texts", list)(30)
+        if t not in report["toolbar"]]
+    getattr(driver, "screenshot", lambda *_: "")("skiptrace-dialog")
+    log(f"[skiptrace] dialog: {report['dialog'][:15]}")
+    log(f"[skiptrace] dialog buttons: {report['dialog_buttons']}")
+
+    if dry:
+        log("[skiptrace] DRY RUN — confirm dialog captured, nothing started")
+        return report
+
+    # confirm: prefer the dialog's own controls, then the usual labels
+    for label in (report["dialog_buttons"] or []) + [
+            "Skip Trace", "Continue", "Confirm", "Start", "Yes", "OK"]:
+        if label.lower() in ("cancel", "close", "no"):
+            continue
+        if _click_text_robust(driver, label):
+            report["confirmed_via"] = label
+            break
+    else:
+        raise VerificationError(
+            f"no confirm control in the skip-trace dialog: {report['dialog']}")
+    wait(6000)
+    _detect_challenge(driver)
+    report["after"] = [t for t in texts() if t not in before][:25]
+    report["started"] = True
+    getattr(driver, "screenshot", lambda *_: "")("skiptrace-started")
+    log(f"[skiptrace] started via {report['confirmed_via']!r} — screen: "
+        f"{report['after'][:12]}")
+    return report
+
+
+def run_export_list(driver, config: BrowserConfig, list_name: str, *,
+                    username: str, password: str, county: str = "harris",
+                    state: str = "tx", dry: bool = False, log=print) -> dict:
+    """My Properties -> open a saved list -> Export the CSV into the leads
+    inbox. ``dry`` stops once the list's toolbar confirms Export exists."""
+
+    report = {"list_name": list_name, "selected": 0, "card_items": [],
+              "downloaded": None, "dry": dry}
+    wait = getattr(driver, "wait_ms", lambda ms: None)
+
+    _open_saved_list(driver, config, list_name, username=username,
+                     password=password, report=report, log=log)
 
     # The list view carries its own toolbar (calibrated live):
     #   Import List | Export | Actions | New Campaign Activity |
@@ -331,7 +400,6 @@ def run_export_list(driver, config: BrowserConfig, list_name: str, *,
     # Export acts on the WHOLE list — no row selection needed (the grid's
     # checkboxes are styled-hidden and selecting 4,933 rows is pointless
     # when the list IS the export scope).
-    report["toolbar"] = getattr(driver, "visible_button_texts", list)(30)
     if not any("export" in t.lower() for t in report["toolbar"]):
         getattr(driver, "screenshot", lambda *_: "")("export-toolbar-miss")
         raise VerificationError(

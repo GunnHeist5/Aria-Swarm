@@ -47,7 +47,8 @@ def main(argv: list[str] | None = None) -> int:
         description="PropStream browser runner (login -> filter -> export -> inbox).")
     parser.add_argument("command", nargs="?", default="pull",
                         choices=["pull", "pull-dry", "pull-v2", "seed-login",
-                                 "export-list", "export-list-dry"])
+                                 "export-list", "export-list-dry",
+                                 "skiptrace-list", "skiptrace-list-dry"])
     parser.add_argument("--list-name", dest="list_name", default=None,
                         help="saved list to export (default: today's "
                              "aria-{county}-{state}-{date})")
@@ -83,7 +84,8 @@ def main(argv: list[str] | None = None) -> int:
     if not args.county:
         parser.error("--county is required for a pull")
 
-    if args.command in ("export-list", "export-list-dry"):
+    if args.command in ("export-list", "export-list-dry",
+                        "skiptrace-list", "skiptrace-list-dry"):
         import json
         from datetime import datetime, timezone
 
@@ -94,14 +96,21 @@ def main(argv: list[str] | None = None) -> int:
         list_name = args.list_name or config.saved_list_name.format(
             county=args.county, state=args.state,
             date=datetime.now(timezone.utc).strftime("%Y%m%d"))
+        skiptrace = args.command.startswith("skiptrace")
+        label = "skiptrace-list" if skiptrace else "export-list"
         try:
             with real_driver(config) as driver:
-                report = flow.run_export_list(
-                    driver, config, list_name, username=user, password=pw,
-                    county=args.county, state=args.state,
-                    dry=(args.command == "export-list-dry"))
+                if skiptrace:
+                    report = flow.run_skiptrace_list(
+                        driver, config, list_name, username=user, password=pw,
+                        dry=args.command.endswith("-dry"))
+                else:
+                    report = flow.run_export_list(
+                        driver, config, list_name, username=user, password=pw,
+                        county=args.county, state=args.state,
+                        dry=args.command.endswith("-dry"))
         except Exception as exc:  # noqa: BLE001
-            print(f"export-list failed: {exc}", file=sys.stderr)
+            print(f"{label} failed: {exc}", file=sys.stderr)
             return 1
         print(json.dumps(report, indent=2))
         return 0
