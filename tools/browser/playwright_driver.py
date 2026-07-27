@@ -729,6 +729,36 @@ class PlaywrightPageDriver:
         download.save_as(dest)
         return dest
 
+    def try_download_click(self, text: str, dest_dir: str,
+                           timeout_ms: int = 15000) -> str:
+        """Click a control (button-scoped first) with the download listener
+        armed. Returns the saved path, or '' when no download followed —
+        the click still happened, so a dialog it opened is now on screen.
+        Never raises."""
+
+        import os
+
+        dest_dir = os.path.expanduser(dest_dir)
+        os.makedirs(dest_dir, exist_ok=True)
+
+        def _click() -> bool:
+            if self.tag_element_by_text('button, [role=button]', text,
+                                        "data-aria-dl"):
+                if self.real_click_css('[data-aria-dl="1"]'):
+                    return True
+            return self.real_click_text(text)
+
+        try:
+            with self.page.expect_download(timeout=timeout_ms) as dl:
+                if not _click():
+                    return ""
+            download = dl.value
+            dest = os.path.join(dest_dir, download.suggested_filename)
+            download.save_as(dest)
+            return dest
+        except Exception:  # noqa: BLE001 — no download == dialog opened
+            return ""
+
     def download_by_text(self, text: str, dest_dir: str) -> str:
         """Arm the download listener and trusted-click the element whose
         text contains ``text`` — the export/CSV controls."""

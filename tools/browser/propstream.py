@@ -325,56 +325,47 @@ def run_export_list(driver, config: BrowserConfig, list_name: str, *,
             break
     report["list_screen"] = getattr(driver, "page_text", lambda *_: "")(1200)
 
-    report["selected"] = _select_all_rows(driver, wait, log)
-    if not report["selected"]:
-        getattr(driver, "screenshot", lambda *_: "")("export-select-miss")
-        report["checkboxes"] = getattr(driver, "css_probe", lambda *a: [])(
-            'input[type=checkbox], [role=checkbox]', 8)
-        report["buttons"] = getattr(driver, "visible_button_texts",
-                                    list)(30)
+    # The list view carries its own toolbar (calibrated live):
+    #   Import List | Export | Actions | New Campaign Activity |
+    #   Skip Trace | Automate List
+    # Export acts on the WHOLE list — no row selection needed (the grid's
+    # checkboxes are styled-hidden and selecting 4,933 rows is pointless
+    # when the list IS the export scope).
+    report["toolbar"] = getattr(driver, "visible_button_texts", list)(30)
+    if not any("export" in t.lower() for t in report["toolbar"]):
+        getattr(driver, "screenshot", lambda *_: "")("export-toolbar-miss")
         raise VerificationError(
-            "select-all never registered on the list view — page text: "
-            f"{report['list_screen']!r} checkboxes: {report['checkboxes']} "
-            f"buttons: {report['buttons']}")
-    log(f"[export] {report['selected']:,} rows selected in {list_name!r}")
-
-    report["card_items"] = _open_actions_card(driver, wait)
-    getattr(driver, "screenshot", lambda *_: "")("export-actions-card")
-    if not report["card_items"]:
-        raise VerificationError("Actions card never opened on the list view")
-    log(f"[export] Actions card: {report['card_items']}")
+            f"no Export control on the list view — toolbar: {report['toolbar']}")
+    log(f"[export] list toolbar: {report['toolbar']}")
 
     if dry:
-        log("[export] DRY RUN — card open, nothing clicked")
+        log("[export] DRY RUN — list open with Export available, "
+            "nothing clicked")
         return report
 
-    export_label = next((t for t in report["card_items"]
-                         if "export" in t.lower()), "")
-    if not export_label:
-        raise VerificationError(
-            f"no export item in the list's Actions card: {report['card_items']}")
-
-    # the export click may download directly or open a format dialog
     dest_dir = str(Path(config.download_dir).expanduser())
-    try:
-        exported = getattr(driver, "download_by_text")(export_label, dest_dir)
-    except Exception:  # noqa: BLE001 — a dialog stands between click and file
-        getattr(driver, "real_click_text", lambda t: False)(export_label)
-        wait(2500)
+    exported = getattr(driver, "try_download_click", lambda *a, **k: "")(
+        "Export", dest_dir, 20000)
+    if not exported:
+        # the click opened a format/scope dialog instead of downloading
+        wait(2000)
         report["export_dialog"] = getattr(driver, "visible_own_texts",
                                           lambda *_: [])()[:25]
+        report["export_dialog_buttons"] = getattr(
+            driver, "visible_button_texts", list)(25)
         getattr(driver, "screenshot", lambda *_: "")("export-dialog")
-        exported = ""
-        for label in ("CSV", "Export", "Download", "Confirm"):
-            try:
-                exported = getattr(driver, "download_by_text")(label, dest_dir)
+        log(f"[export] export dialog: {report['export_dialog'][:12]}")
+        for label in ("CSV", "Download", "Export", "Confirm", "OK"):
+            exported = getattr(driver, "try_download_click",
+                               lambda *a, **k: "")(label, dest_dir, 60000)
+            if exported:
+                report["export_via"] = label
                 break
-            except Exception:  # noqa: BLE001
-                continue
-        if not exported:
-            raise VerificationError(
-                "export clicked but no download started — dialog: "
-                f"{report.get('export_dialog')}")
+    if not exported:
+        raise VerificationError(
+            "Export clicked but no file downloaded — dialog: "
+            f"{report.get('export_dialog')} buttons: "
+            f"{report.get('export_dialog_buttons')}")
     dest = move_to_inbox(exported, county, state)
     report["downloaded"] = str(dest)
     log(f"[export] downloaded -> {dest}")
