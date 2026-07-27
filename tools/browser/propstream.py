@@ -478,17 +478,22 @@ def run_pull_v2(driver, config: BrowserConfig, county: str, state: str, *,
     getattr(driver, "screenshot", lambda *_: "")(
         "pull-v2-actions-menu" if mode else "pull-v2-actions-miss")
     if not mode:
-        muts = report["dom_mutations"]
-        transient = [m for m in muts
-                     if any(h in m.lower() for h in hints)]
+        # STRUCTURE dump: fire onClick once more and capture the wrapper's
+        # raw HTML + the tail of <body> (portal mount point) — an empty menu
+        # node is invisible to every text-based instrument above
+        getattr(driver, "react_invoke", lambda c, n: "")(toggle_css,
+                                                         "onClick")
+        wait(1000)
+        report["wrapper_html"] = getattr(driver, "subtree_html",
+                                         lambda *a: "")(
+            '[class*="actionWrapper"]', 2500)
+        report["body_tail"] = getattr(driver, "tail_html", lambda *a: [])(
+            3, 700)
         raise VerificationError(
-            ("Actions menu is TRANSIENT — it mounted during a gesture but "
-             f"closed itself; captured items: {transient} "
-             if transient else
-             "Actions menu never surfaced under any gesture (real click, "
-             "react handlers, keyboard, hold) — ")
-            + f"attempts: {attempts} mutations: {muts} "
-            + f"toggle: {toggle_css} react: {report['react_probe']}")
+            "Actions onClick runs but no menu text ever appears — "
+            f"wrapper html: {report['wrapper_html']!r} "
+            f"body tail: {report['body_tail']} "
+            f"attempts: {attempts}")
     log(f"[pull-v2] Actions menu opened ({mode}) — items: {menu_texts}")
 
     # map the real labels (whatever they are) to the flow's needs

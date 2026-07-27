@@ -520,6 +520,30 @@ class PlaywrightPageDriver:
         except Exception:  # noqa: BLE001
             return "error"
 
+    def subtree_html(self, css: str, limit: int = 2000) -> str:
+        """outerHTML of the first match — structure beats text when a menu
+        mounts empty."""
+
+        try:
+            return self.page.evaluate(
+                """([css, limit]) => {
+                    const el = document.querySelector(css);
+                    return el ? el.outerHTML.slice(0, limit) : '';
+                }""", [css, limit]) or ""
+        except Exception:  # noqa: BLE001
+            return ""
+
+    def tail_html(self, n: int = 3, limit: int = 800) -> list:
+        """outerHTML slices of the LAST n direct children of <body> — where
+        portal-rendered menus/dialogs mount."""
+
+        try:
+            return self.page.evaluate(
+                """([n, limit]) => [...document.body.children].slice(-n)
+                    .map(el => el.outerHTML.slice(0, limit))""", [n, limit])
+        except Exception:  # noqa: BLE001
+            return []
+
     def dispatch_pointer_sequence(self, css: str) -> bool:
         """Full SYNTHETIC pointer gesture (pointerdown -> mousedown ->
         pointerup -> mouseup -> click) on an element — components that open
