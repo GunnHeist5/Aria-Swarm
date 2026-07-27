@@ -225,7 +225,8 @@ def run_pull_v2(driver, config: BrowserConfig, county: str, state: str, *,
     """
 
     report = {"county": county, "state": state, "count": None,
-              "actions_menu": [], "downloaded": None, "dry": dry}
+              "actions_menu": [], "downloaded": None, "dry": dry,
+              "vacant_class_applied": False}
 
     login(driver, config, username, password)
 
@@ -267,11 +268,25 @@ def run_pull_v2(driver, config: BrowserConfig, county: str, state: str, *,
     driver.is_present("filters.find", timeout_ms=4000)
     getattr(driver, "click_any_containing", lambda w: "")(["Clear Filter"])
     if use_vacant_class:
-        getattr(driver, "click_after_heading", lambda *a: None)(
-            "Property Classification(s)", "Vacant Land")
+        # verify the chip actually applied: selecting Vacant Land reveals its
+        # sub-classification chips ('Agricultural-Unimproved Vacant Land' —
+        # screenshot-confirmed); retry once if the toggle missed
+        for _ in range(2):
+            getattr(driver, "click_after_heading", lambda *a: None)(
+                "Property Classification(s)", "Vacant Land")
+            wait(1200)
+            if "Agricultural-Unimproved" in getattr(
+                    driver, "page_text", lambda *_: "")(6000):
+                report["vacant_class_applied"] = True
+                break
+        else:
+            raise VerificationError(
+                "Vacant Land classification did not apply (sub-chips never "
+                "appeared) — refusing to pull the wrong property class")
     for label, min_v, max_v in recipe_steps:
         getattr(driver, "fill_labeled_range", lambda *a, **k: None)(
             label, min_v, max_v)
+        getattr(driver, "press_key", lambda k: None)("Tab")
     if lot_min_sqft:
         getattr(driver, "fill_labeled_range", lambda *a, **k: None)(
             "Lot Size (SqFt)", lot_min_sqft, None)

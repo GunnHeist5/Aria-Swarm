@@ -56,6 +56,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--assessed-min", type=float, dest="assessed_min")
     parser.add_argument("--assessed-max", type=float, dest="assessed_max")
     parser.add_argument("--max-export", type=int, dest="max_export")
+    parser.add_argument("--years-owned-min", type=int, default=None,
+                        help="Years of Ownership minimum (recipe filter)")
     parser.add_argument("--no-absentee", action="store_true")
     parser.add_argument("--tax-delinquent", action="store_true")
     parser.add_argument("--no-skiptrace", action="store_true")
@@ -84,11 +86,26 @@ def main(argv: list[str] | None = None) -> int:
         from .session import real_driver, resolve_credentials
 
         user, pw = resolve_credentials(config)
+        # config ranges -> the panel's label-anchored Min/Max fields
+        steps = []
+        if config.lot_min_acres or config.lot_max_acres:
+            steps.append(("Lot Size (SqFt)",
+                          int(config.lot_min_acres * 43560)
+                          if config.lot_min_acres else None,
+                          int(config.lot_max_acres * 43560)
+                          if config.lot_max_acres else None))
+        if config.assessed_min_usd or config.assessed_max_usd:
+            steps.append(("Assessed Total Value",
+                          config.assessed_min_usd, config.assessed_max_usd))
+        if args.years_owned_min:
+            steps.append(("Years of Ownership", args.years_owned_min, None))
         try:
             with real_driver(config) as driver:
                 report = flow.run_pull_v2(
                     driver, config, args.county, args.state,
                     username=user, password=pw,
+                    recipe_steps=steps,
+                    lot_min_sqft=None if steps else 5000,
                     dry=(args.command == "pull-dry"))
         except Exception as exc:  # noqa: BLE001
             print(f"pull-v2 failed: {exc}", file=sys.stderr)
