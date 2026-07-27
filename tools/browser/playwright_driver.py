@@ -433,6 +433,41 @@ class PlaywrightPageDriver:
         except Exception:  # noqa: BLE001
             return []
 
+    def dispatch_pointer_sequence(self, css: str) -> bool:
+        """Full SYNTHETIC pointer gesture (pointerdown -> mousedown ->
+        pointerup -> mouseup -> click) on an element — components that open
+        on mousedown never react to a bare el.click()."""
+
+        try:
+            return bool(self.page.evaluate(
+                """(css) => {
+                    const el = document.querySelector(css);
+                    if (!el) return false;
+                    const r = el.getBoundingClientRect();
+                    const opts = {bubbles: true, cancelable: true, button: 0,
+                                  clientX: r.x + r.width / 2,
+                                  clientY: r.y + r.height / 2};
+                    for (const t of ['pointerdown', 'mousedown', 'pointerup',
+                                     'mouseup', 'click'])
+                        el.dispatchEvent(t.startsWith('pointer')
+                            ? new PointerEvent(t, opts)
+                            : new MouseEvent(t, opts));
+                    return true;
+                }""", css))
+        except Exception:  # noqa: BLE001
+            return False
+
+    def focus_and_key(self, css: str, key: str) -> bool:
+        """Focus an element and press a key — dropdowns commonly open on
+        Enter/Space/ArrowDown even when pointer handlers misbehave."""
+
+        try:
+            self.page.locator(css).first.focus(timeout=3000)
+            self.page.keyboard.press(key)
+            return True
+        except Exception:  # noqa: BLE001
+            return False
+
     def mouse_down_on(self, css: str) -> bool:
         """Press (and HOLD) the mouse on an element's center — for menus
         that only stay open while the button is held."""
