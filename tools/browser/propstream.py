@@ -381,15 +381,23 @@ def run_pull_v2(driver, config: BrowserConfig, county: str, state: str, *,
             f"carrying 'Actions' text: {probe}")
     log(f"[pull-v2] Actions menu opened via {opened}")
     wait(1200)  # menu animation
-    report["actions_menu"] = getattr(driver, "visible_button_texts",
-                                     list)(50)
-    # the menu items may render as non-buttons too — keep a text snapshot
-    report["menu_text"] = getattr(driver, "page_text", lambda *_: "")(1200)
+    # prove the menu ITEMS are present before anything real is clicked —
+    # visible_button_texts/page_text missed them (portal rendering), so
+    # probe each expected item by its own text
+    probe = getattr(driver, "text_probe", lambda *a: [])
+    report["menu_items"] = {label: probe(label, 5) for label in
+                            ("Export", "Skip Trace", "Add to List")}
     getattr(driver, "screenshot", lambda *_: "")("pull-v2-actions-menu")
 
     if dry:
         log("[pull-v2] DRY RUN — Actions menu captured, nothing acted on")
         return report
+
+    # fail closed if the export item never surfaced in the opened menu
+    if not any(e.get("visible") for e in report["menu_items"]["Export"]):
+        raise VerificationError(
+            "Actions menu opened but no visible 'Export' item — "
+            f"probes: {report['menu_items']}")
 
     # skip trace first when enabled (the export then carries contacts)
     if config.run_skiptrace:
