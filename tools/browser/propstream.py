@@ -454,23 +454,97 @@ def run_pull_v2(driver, config: BrowserConfig, county: str, state: str, *,
             "nothing clicked")
         return report
 
-    before = set(getattr(driver, "visible_own_texts", lambda *_: [])())
+    def _texts():
+        return getattr(driver, "visible_own_texts", lambda *_: [])()
+
+    def _click_item(label: str) -> str:
+        """Tag the deepest element with this exact text and fire its React
+        onClick (falling back to a trusted click)."""
+
+        if not getattr(driver, "tag_deepest_by_text", lambda *a: False)(
+                label, "data-aria-item"):
+            return ""
+        res = getattr(driver, "react_invoke", lambda c, n: "")(
+            '[data-aria-item="1"]', "onClick")
+        if res.startswith("invoked"):
+            return res
+        return ("real_click" if getattr(driver, "real_click_text",
+                                        lambda t: False)(label) else "")
+
+    before = set(_texts())
     invoked = getattr(driver, "react_invoke", lambda c, n: "")(
         '[data-aria-save="1"]', "onClick")
     attempts.append(f"save_onClick:{invoked}")
     wait(2000)
-    # capture whatever the Save action surfaced (name dialog / confirmation /
-    # navigation to My Properties) so the next leg can be calibrated
-    save_diff = [t for t in getattr(driver, "visible_own_texts",
-                                    lambda *_: [])() if t not in before]
+    # 'Save' opens the real action dialog — calibrated live 2026-07-27:
+    #   Add to Marketing List | Skip Trace Selected Properties | Cancel
+    save_diff = [t for t in _texts() if t not in before]
     report["after_save"] = save_diff[:25]
-    getattr(driver, "screenshot", lambda *_: "")("pull-v2-after-save")
-    log(f"[pull-v2] Save clicked — new on screen: {save_diff[:15]}")
+    log(f"[pull-v2] Save dialog: {save_diff[:15]}")
 
-    # The export/skip-trace leg lives in My Properties on the saved list and
-    # is not yet calibrated. Stop here with the selection saved (no money
-    # spent) rather than blindly driving an unproven flow.
+    # SKIP TRACE (real money, per record) — only on the explicit flag, and
+    # only under the row cap already enforced above.
+    if config.run_skiptrace:
+        label = next((t for t in save_diff if "skip trace" in t.lower()),
+                     "Skip Trace Selected Properties")
+        log(f"[pull-v2] skip tracing {selected:,} records (BILLABLE)")
+        res = _click_item(label)
+        attempts.append(f"skiptrace:{res or 'miss'}")
+        if not res:
+            raise VerificationError(
+                f"could not click {label!r} — dialog: {save_diff}")
+        wait(3000)
+        _detect_challenge(driver)
+        report["after_skiptrace"] = [t for t in _texts()
+                                     if t not in before][:25]
+        getattr(driver, "screenshot", lambda *_: "")("pull-v2-skiptrace")
+        log(f"[pull-v2] skip trace screen: {report['after_skiptrace'][:12]}")
+        raise VerificationError(
+            "skip-trace dialog reached — confirm step not yet calibrated; "
+            f"screen: {report['after_skiptrace']}")
+
+    # LIST PATH (free): Add to Marketing List -> name it -> confirm. The
+    # export itself lives in My Properties on the saved list.
+    label = next((t for t in save_diff if "marketing list" in t.lower()),
+                 "Add to Marketing List")
+    res = _click_item(label)
+    attempts.append(f"add_to_list:{res or 'miss'}")
+    if not res:
+        getattr(driver, "screenshot", lambda *_: "")("pull-v2-dialog-miss")
+        raise VerificationError(
+            f"could not click {label!r} — dialog: {save_diff}")
+    wait(2500)
+    report["list_dialog"] = [t for t in _texts() if t not in before][:25]
+    report["list_dialog_fields"] = getattr(driver, "dom_inventory",
+                                           lambda *_: [])(25)
+    getattr(driver, "screenshot", lambda *_: "")("pull-v2-list-dialog")
+
+    list_name = config.saved_list_name.format(
+        county=county, state=state,
+        date=datetime.now(timezone.utc).strftime("%Y%m%d"))
+    filled = getattr(driver, "fill_css", lambda c, v: False)(
+        'input[type="text"]:not([placeholder*="Search"])', list_name)
+    attempts.append(f"name_filled:{filled}")
+    report["list_name"] = list_name
+    log(f"[pull-v2] naming the list {list_name!r} (filled={filled})")
+    wait(800)
+    for affirm in ("Save", "Create", "Add", "Apply", "OK"):
+        if _click_item(affirm):
+            attempts.append(f"confirm:{affirm}")
+            break
+    else:
+        raise VerificationError(
+            "no confirm control in the list dialog — fields: "
+            f"{report['list_dialog_fields']} texts: {report['list_dialog']}")
+    wait(3000)
+    report["after_list_save"] = [t for t in _texts() if t not in before][:25]
+    getattr(driver, "screenshot", lambda *_: "")("pull-v2-list-saved")
+    log(f"[pull-v2] list saved — screen: {report['after_list_save'][:12]}")
+
+    # The CSV export lives in My Properties on the saved list and is not
+    # calibrated yet. Stop with the selection safely persisted (nothing
+    # billable spent) rather than driving an unproven flow.
     raise VerificationError(
-        "selection SAVED to a list — the export + skip-trace leg in "
-        "My Properties is not yet automated; after-save screen: "
-        f"{report['after_save']}")
+        f"selection saved to list {list_name!r} ({selected:,} properties) — "
+        "the My Properties export leg is not automated yet; after-save "
+        f"screen: {report['after_list_save']}")

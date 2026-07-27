@@ -433,6 +433,44 @@ class PlaywrightPageDriver:
         except Exception:  # noqa: BLE001
             return []
 
+    def tag_deepest_by_text(self, text: str,
+                            attr: str = "data-aria-item") -> bool:
+        """Stamp a marker on the DEEPEST visible element whose text equals
+        ``text`` — for dialog/menu items of unknown tag. Deepest is the
+        safest target: react_invoke walks ANCESTORS for the handler, so a
+        label inside a button still resolves, while tagging an outer
+        container could grab the wrong widget."""
+
+        try:
+            return bool(self.page.evaluate(
+                """([text, attr]) => {
+                    let hit = null;
+                    for (const el of document.querySelectorAll('body *')) {
+                        const r = el.getBoundingClientRect();
+                        if (r.width === 0 || r.height === 0) continue;
+                        const t = (el.innerText || '')
+                            .replace(/\\s+/g, ' ').trim();
+                        if (t === text) hit = el;  // last = deepest
+                    }
+                    if (!hit) return false;
+                    hit.setAttribute(attr, '1');
+                    return true;
+                }""", [text, attr]))
+        except Exception:  # noqa: BLE001
+            return False
+
+    def fill_css(self, css: str, value: str) -> bool:
+        """Type into the first input matching ``css`` (trusted keyboard)."""
+
+        try:
+            loc = self.page.locator(css).first
+            loc.click(timeout=4000)
+            loc.fill("", timeout=2000)
+            self.page.keyboard.type(value, delay=35)
+            return True
+        except Exception:  # noqa: BLE001
+            return False
+
     def tag_element_by_text(self, css: str, text: str,
                             attr: str = "data-aria-target") -> bool:
         """Stamp a marker attribute on the element matching ``css`` whose
