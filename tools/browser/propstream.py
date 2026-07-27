@@ -408,8 +408,19 @@ def run_pull_v2(driver, config: BrowserConfig, county: str, state: str, *,
     # click, and whatever text is NEW is the menu, whatever it's called.
     snap = getattr(driver, "visible_own_texts", lambda *_: [])
     report["actions_attempts"] = attempts = []
-    toggle_css = '[class*="Results-style"][class*="dropdownToggleBtn"]'
     hints = ("export", "skip", "trace", "list", "marketing", "save")
+
+    # Aim at the element whose text IS 'Actions' — several dropdownToggleBtn
+    # siblings exist and the bare class selector's .first was a column-filter
+    # toggle (its 'Input Range / Save' popup kept surfacing in mutations).
+    def _tag_toggle() -> str:
+        if getattr(driver, "tag_element_by_text", lambda *a, **k: False)(
+                '[class*="dropdownToggleBtn"]', "Actions"):
+            return '[data-aria-target="1"]'
+        return '[class*="Results-style"][class*="dropdownToggleBtn"]'
+
+    toggle_css = _tag_toggle()
+    report["toggle_css"] = toggle_css
 
     def _menu_hits(texts):
         return [t for t in texts
@@ -487,7 +498,7 @@ def run_pull_v2(driver, config: BrowserConfig, county: str, state: str, *,
     def _menu_click(label: str) -> bool:
         if mode == "hold":
             return getattr(driver, "hold_click_menu_item",
-                           lambda c, t: False)(toggle_css, label)
+                           lambda c, t: False)(_tag_toggle(), label)
         if not getattr(driver, "any_text_visible", lambda t: False)(label):
             opener_by_name.get(mode, lambda: False)()  # reopen the same way
             wait(1200)
@@ -512,7 +523,8 @@ def run_pull_v2(driver, config: BrowserConfig, county: str, state: str, *,
                 driver.click("skiptrace.confirm")
             _verify(driver, "skiptrace", config)
             if mode != "hold":  # hold mode reopens the menu per click
-                getattr(driver, "real_click_css", lambda c: False)(toggle_css)
+                getattr(driver, "real_click_css", lambda c: False)(
+                    _tag_toggle())  # re-tag: re-renders drop the attribute
                 wait(1200)
     elif config.run_skiptrace:
         raise VerificationError(

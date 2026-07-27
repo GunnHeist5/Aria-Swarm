@@ -433,6 +433,29 @@ class PlaywrightPageDriver:
         except Exception:  # noqa: BLE001
             return []
 
+    def tag_element_by_text(self, css: str, text: str,
+                            attr: str = "data-aria-target") -> bool:
+        """Stamp a marker attribute on the element matching ``css`` whose
+        own text equals ``text`` — a class selector alone can hit the WRONG
+        sibling (observed live: several dropdownToggleBtn elements exist and
+        .first was a column-filter toggle, not the Actions menu)."""
+
+        try:
+            return bool(self.page.evaluate(
+                """([css, text, attr]) => {
+                    for (const el of document.querySelectorAll(css)) {
+                        const t = (el.innerText || '')
+                            .replace(/\\s+/g, ' ').trim();
+                        if (t === text) {
+                            el.setAttribute(attr, '1');
+                            return true;
+                        }
+                    }
+                    return false;
+                }""", [css, text, attr]))
+        except Exception:  # noqa: BLE001
+            return False
+
     def dispatch_pointer_sequence(self, css: str) -> bool:
         """Full SYNTHETIC pointer gesture (pointerdown -> mousedown ->
         pointerup -> mouseup -> click) on an element — components that open
