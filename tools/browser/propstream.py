@@ -400,93 +400,53 @@ def run_pull_v2(driver, config: BrowserConfig, county: str, state: str, *,
     report["selected"] = selected
     log(f"[pull-v2] {selected:,} rows selected")
 
-    # The Actions dropdown holds Add to List / Skip Trace / Export. Proven
-    # live: it's a bare div AND clicking the last 'Actions'-text match put
-    # no 'Export' in the DOM at all — so a click alone proves nothing (a
-    # grid column header can collide on the text, or the toggle may be
-    # hover-driven). Try each Actions-text element (hover events + click),
-    # newest-mounted first; the ONLY success signal is a visible Export.
-    probe = getattr(driver, "text_probe", lambda *a: [])
-    report["actions_candidates"] = probe("Actions", 8)
+    # The Actions dropdown. Proven live: the trusted toggle click LANDS
+    # (panel closed, real pointer events) yet no guessed label ('Export',
+    # 'Skip Trace', 'Add to List') ever appears, and the toggle's parent
+    # holds only the caret — the items portal elsewhere under unknown
+    # labels. So detect the menu by DOM-DIFF: snapshot every visible text,
+    # click, and whatever text is NEW is the menu, whatever it's called.
+    snap = getattr(driver, "visible_own_texts", lambda *_: [])
     report["actions_attempts"] = attempts = []
-
-    def _export_visible() -> bool:
-        # the JS probe can't pierce shadow DOM — the Playwright check can
-        return (any(e.get("visible") for e in probe("Export", 5))
-                or getattr(driver, "any_text_visible",
-                           lambda t: False)("Export"))
-
-    opened = ""
-    # calibrated live 2026-07-27: the toggle is div.dropdownToggleBtn and it
-    # IGNORES synthetic el.click() — only a trusted pointer sequence opens
-    # it, so the real-events click is the primary
-    for css in ('[class*="Results-style"][class*="dropdownToggleBtn"]',
-                '[class*="dropdownToggleBtn"]'):
-        for _ in range(3):
-            ok = getattr(driver, "real_click_css", lambda c: False)(css)
-            attempts.append(f"real_click_css({css}):{ok}")
-            wait(1500)
-            if ok and _export_visible():
-                opened = "dropdownToggleBtn (real click)"
-                break
-        if opened:
-            break
-    for _ in range(2):
-        if opened:
-            break
-        for idx in range(max(1, len(report["actions_candidates"]))):
-            hit = getattr(driver, "click_nth_deep_text",
-                          lambda w, i: "")(["Actions"], idx)
-            attempts.append(f"deep_click[{idx}]:{hit or 'miss'}")
-            if not hit:
-                break
-            wait(1500)
-            if _export_visible():
-                opened = hit
-                break
-        if opened:
-            break
-        wait(1500)
-    report["menu_items"] = {
-        label: {"probe": probe(label, 5),
-                "locator_visible": getattr(driver, "any_text_visible",
-                                           lambda t: False)(label)}
-        for label in ("Export", "Skip Trace", "Add to List")}
-    if not opened:
-        # last diagnostic: open the menu one more time and dump what the
-        # dropdown ACTUALLY contains — scoped to the toggle's own component
-        # (a broad dump drowned in header/panel elements)
-        getattr(driver, "real_click_css", lambda c: False)(
+    before = set(snap())
+    menu_texts: list = []
+    for _ in range(6):
+        ok = getattr(driver, "real_click_css", lambda c: False)(
             '[class*="Results-style"][class*="dropdownToggleBtn"]')
+        attempts.append(f"real_click_css:{ok}")
         wait(1500)
-        report["dropdown_dump"] = {
-            "toggle_parent": getattr(driver, "parent_text_of", lambda c: "")(
-                '[class*="Results-style"][class*="dropdownToggleBtn"]'),
-            "results_dropdown": getattr(driver, "css_probe", lambda *a: [])(
-                '[class*="Results-style"][class*="ropdown"]', 12),
-        }
-        getattr(driver, "screenshot", lambda *_: "")("pull-v2-actions-miss")
+        menu_texts = [t for t in snap() if t not in before]
+        if menu_texts:
+            break
+    report["menu_texts"] = menu_texts
+    getattr(driver, "screenshot", lambda *_: "")(
+        "pull-v2-actions-menu" if menu_texts else "pull-v2-actions-miss")
+    if not menu_texts:
         raise VerificationError(
-            "no Actions click produced a visible 'Export' item — "
-            f"dropdown dump: {report['dropdown_dump']} "
-            f"attempts: {attempts}")
-    log(f"[pull-v2] Actions menu opened via {opened} (Export visible)")
-    getattr(driver, "screenshot", lambda *_: "")("pull-v2-actions-menu")
+            "Actions toggle clicks changed NOTHING on screen (DOM-diff "
+            f"empty after {len(attempts)} clicks) — attempts: {attempts}")
+    log(f"[pull-v2] Actions menu opened — items: {menu_texts}")
+
+    # map the real labels (whatever they are) to the flow's needs
+    export_label = next((t for t in menu_texts if "export" in t.lower()), "")
+    skiptrace_label = next((t for t in menu_texts if "skip" in t.lower()), "")
+    report["export_label"] = export_label
+    report["skiptrace_label"] = skiptrace_label
 
     if dry:
-        log("[pull-v2] DRY RUN — Actions menu verified open, nothing acted on")
+        log("[pull-v2] DRY RUN — menu open, nothing acted on")
         return report
 
+    if not export_label:
+        raise VerificationError(
+            f"Actions menu has no export-ish item — items: {menu_texts}; "
+            "the export may live elsewhere (e.g. My Properties lists)")
+
     # skip trace first when enabled (the export then carries contacts) —
-    # real-events click first: the items share the toggle's dropdown
-    if config.run_skiptrace:
-        matched = (getattr(driver, "real_click_text", lambda t: False)(
-                       "Skip Trace")
-                   or getattr(driver, "click_any_containing", lambda w: "")(
-                       ["Skip Trace"])
-                   or getattr(driver, "click_deep_text", lambda w: "")(
-                       ["Skip Trace"]))
-        if matched:
+    # trusted click on the DISCOVERED label, not a guessed one
+    if config.run_skiptrace and skiptrace_label:
+        if getattr(driver, "real_click_text", lambda t: False)(
+                skiptrace_label):
             _detect_challenge(driver)
             if driver.is_present("skiptrace.confirm",
                                  timeout_ms=config.default_timeout_ms):
@@ -496,15 +456,15 @@ def run_pull_v2(driver, config: BrowserConfig, county: str, state: str, *,
             getattr(driver, "real_click_css", lambda c: False)(
                 '[class*="Results-style"][class*="dropdownToggleBtn"]')
             wait(1200)
+    elif config.run_skiptrace:
+        raise VerificationError(
+            f"skip trace requested but no skip-ish menu item — {menu_texts}")
 
-    # export: menu item, then the CSV/confirm control triggers the download
-    matched = (getattr(driver, "real_click_text", lambda t: False)("Export")
-               or getattr(driver, "click_any_containing", lambda w: "")(
-                   ["Export"])
-               or getattr(driver, "click_deep_text", lambda w: "")(
-                   ["Export"]))
-    if not matched:
-        raise VerificationError("Export action not found in the Actions menu")
+    # export: the discovered menu item, then the CSV/confirm control
+    # triggers the download
+    if not getattr(driver, "real_click_text", lambda t: False)(export_label):
+        raise VerificationError(
+            f"could not click the export item {export_label!r}")
     exported = getattr(driver, "download_by_words")(
         ["CSV"], str(Path(config.download_dir).expanduser()))
     dest = move_to_inbox(exported, county, state)

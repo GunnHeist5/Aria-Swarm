@@ -364,6 +364,30 @@ class PlaywrightPageDriver:
         except Exception:  # noqa: BLE001
             return []
 
+    def visible_own_texts(self, limit: int = 800) -> list:
+        """Every visible element's OWN short text (deduped) — snapshot it
+        before and after a click and the difference names whatever UI just
+        appeared (menu items, dialogs), wherever they portal to."""
+
+        try:
+            return self.page.evaluate(
+                """(limit) => {
+                    const out = new Set();
+                    for (const el of document.querySelectorAll('body *')) {
+                        const r = el.getBoundingClientRect();
+                        if (r.width === 0 || r.height === 0) continue;
+                        const own = [...el.childNodes]
+                            .filter(n => n.nodeType === 3)
+                            .map(n => n.textContent).join(' ')
+                            .replace(/\\s+/g, ' ').trim();
+                        if (own && own.length < 50) out.add(own);
+                        if (out.size >= limit) break;
+                    }
+                    return [...out];
+                }""", limit)
+        except Exception:  # noqa: BLE001
+            return []
+
     def parent_text_of(self, css: str) -> str:
         """innerText of the matched element's PARENT — dumps a dropdown
         container's real items given its toggle's selector."""
