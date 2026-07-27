@@ -312,18 +312,57 @@ def run_pull_v2(driver, config: BrowserConfig, county: str, state: str, *,
     getattr(driver, "click_button_containing", lambda w: "")(
         ["View", "Propert"])
     wait(4000)  # results panel loads its first page async
+
+    import re
+
+    def _selected_count():
+        m = re.search(r"([\d,]+)\s+SELECTED",
+                      getattr(driver, "page_text", lambda *_: "")(4000))
+        return int(m.group(1).replace(",", "")) if m else None
+
+    # Select all. The counter reads '0 SELECTED' until the selection actually
+    # registers (bare 'SELECTED' in page text proves nothing), so poll for a
+    # NON-ZERO count with real waits; one careful re-click if the first click
+    # landed while the grid was still hydrating (re-clicking an unselected
+    # grid is safe; a selected grid never reaches the re-click).
     if not getattr(driver, "click_first_checkbox", lambda: "")():
         raise VerificationError("results select-all checkbox not found")
-    wait(1500)
-    if "SELECTED" not in getattr(driver, "page_text", lambda *_: "")(3000):
+    selected = 0
+    for attempt in range(10):
+        wait(1500)
+        selected = _selected_count() or 0
+        if selected:
+            break
+        if attempt == 4:
+            getattr(driver, "click_first_checkbox", lambda: "")()
+    if not selected:
+        getattr(driver, "screenshot", lambda *_: "")("pull-v2-select-miss")
         raise VerificationError(
-            "selection not confirmed (no 'SELECTED' marker) — refusing to "
-            "proceed to actions")
+            "selection not confirmed (counter never left '0 SELECTED') — "
+            "refusing to proceed to actions")
+    report["selected"] = selected
+    log(f"[pull-v2] {selected:,} rows selected")
 
-    # the Actions menu holds Add to List / Skip Trace / Export
-    if not getattr(driver, "click_button_containing", lambda w: "")(
-            ["Actions"]):
-        raise VerificationError("Actions menu button not found")
+    # The Actions menu holds Add to List / Skip Trace / Export. The action
+    # bar can lag behind the selection and may render 'Actions' as a
+    # non-<button> element — retry both matchers with real waits, and on a
+    # miss report what IS on screen instead of failing blind.
+    opened = ""
+    for _ in range(6):
+        opened = (getattr(driver, "click_button_containing", lambda w: "")(
+                      ["Actions"])
+                  or getattr(driver, "click_any_containing", lambda w: "")(
+                      ["Actions"]))
+        if opened:
+            break
+        wait(1500)
+    if not opened:
+        buttons = getattr(driver, "visible_button_texts", list)(50)
+        report["actions_menu"] = buttons
+        getattr(driver, "screenshot", lambda *_: "")("pull-v2-actions-miss")
+        raise VerificationError(
+            "Actions menu control not found after selection — visible "
+            f"buttons on screen: {buttons}")
     wait(1200)  # menu animation
     report["actions_menu"] = getattr(driver, "visible_button_texts",
                                      list)(50)
@@ -343,9 +382,12 @@ def run_pull_v2(driver, config: BrowserConfig, county: str, state: str, *,
                                  timeout_ms=config.default_timeout_ms):
                 driver.click("skiptrace.confirm")
             _verify(driver, "skiptrace", config)
-            # reopen the menu for the export
-            getattr(driver, "click_button_containing", lambda w: "")(
-                ["Actions"])
+            # reopen the menu for the export (same dual matcher as above)
+            (getattr(driver, "click_button_containing", lambda w: "")(
+                 ["Actions"])
+             or getattr(driver, "click_any_containing", lambda w: "")(
+                 ["Actions"]))
+            wait(1200)
 
     # export: menu item, then the CSV/confirm control triggers the download
     matched = getattr(driver, "click_any_containing", lambda w: "")(["Export"])
