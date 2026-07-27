@@ -343,13 +343,15 @@ def run_pull_v2(driver, config: BrowserConfig, county: str, state: str, *,
     report["selected"] = selected
     log(f"[pull-v2] {selected:,} rows selected")
 
-    # The Actions menu holds Add to List / Skip Trace / Export. The action
-    # bar can lag behind the selection and may render 'Actions' as a
-    # non-<button> element — retry both matchers with real waits, and on a
-    # miss report what IS on screen instead of failing blind.
+    # The Actions menu holds Add to List / Skip Trace / Export. Proven live:
+    # it is NOT a button/span (the tag-scoped matchers miss it), so the
+    # deep own-text clicker is the primary; retry with real waits, and on a
+    # miss report exactly how 'Actions' renders instead of failing blind.
     opened = ""
     for _ in range(6):
-        opened = (getattr(driver, "click_button_containing", lambda w: "")(
+        opened = (getattr(driver, "click_deep_text", lambda w: "")(
+                      ["Actions"])
+                  or getattr(driver, "click_button_containing", lambda w: "")(
                       ["Actions"])
                   or getattr(driver, "click_any_containing", lambda w: "")(
                       ["Actions"]))
@@ -357,15 +359,18 @@ def run_pull_v2(driver, config: BrowserConfig, county: str, state: str, *,
             break
         wait(1500)
     if not opened:
-        buttons = getattr(driver, "visible_button_texts", list)(50)
-        report["actions_menu"] = buttons
+        probe = getattr(driver, "text_probe", lambda *a: [])("Actions")
+        report["actions_probe"] = probe
         getattr(driver, "screenshot", lambda *_: "")("pull-v2-actions-miss")
         raise VerificationError(
-            "Actions menu control not found after selection — visible "
-            f"buttons on screen: {buttons}")
+            "Actions menu control not found after selection — elements "
+            f"carrying 'Actions' text: {probe}")
+    log(f"[pull-v2] Actions menu opened via {opened}")
     wait(1200)  # menu animation
     report["actions_menu"] = getattr(driver, "visible_button_texts",
                                      list)(50)
+    # the menu items may render as non-buttons too — keep a text snapshot
+    report["menu_text"] = getattr(driver, "page_text", lambda *_: "")(1200)
     getattr(driver, "screenshot", lambda *_: "")("pull-v2-actions-menu")
 
     if dry:
@@ -374,23 +379,29 @@ def run_pull_v2(driver, config: BrowserConfig, county: str, state: str, *,
 
     # skip trace first when enabled (the export then carries contacts)
     if config.run_skiptrace:
-        matched = getattr(driver, "click_any_containing", lambda w: "")(
-            ["Skip Trace"])
+        matched = (getattr(driver, "click_any_containing", lambda w: "")(
+                       ["Skip Trace"])
+                   or getattr(driver, "click_deep_text", lambda w: "")(
+                       ["Skip Trace"]))
         if matched:
             _detect_challenge(driver)
             if driver.is_present("skiptrace.confirm",
                                  timeout_ms=config.default_timeout_ms):
                 driver.click("skiptrace.confirm")
             _verify(driver, "skiptrace", config)
-            # reopen the menu for the export (same dual matcher as above)
-            (getattr(driver, "click_button_containing", lambda w: "")(
+            # reopen the menu for the export (same matcher chain as above)
+            (getattr(driver, "click_deep_text", lambda w: "")(["Actions"])
+             or getattr(driver, "click_button_containing", lambda w: "")(
                  ["Actions"])
              or getattr(driver, "click_any_containing", lambda w: "")(
                  ["Actions"]))
             wait(1200)
 
     # export: menu item, then the CSV/confirm control triggers the download
-    matched = getattr(driver, "click_any_containing", lambda w: "")(["Export"])
+    matched = (getattr(driver, "click_any_containing", lambda w: "")(
+                   ["Export"])
+               or getattr(driver, "click_deep_text", lambda w: "")(
+                   ["Export"]))
     if not matched:
         raise VerificationError("Export action not found in the Actions menu")
     exported = getattr(driver, "download_by_words")(

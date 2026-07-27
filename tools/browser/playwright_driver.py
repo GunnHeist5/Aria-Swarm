@@ -156,6 +156,64 @@ class PlaywrightPageDriver:
         except Exception:  # noqa: BLE001
             return ""
 
+    def click_deep_text(self, words: list) -> str:
+        """JS-click the DEEPEST visible element (any tag) whose text contains
+        ALL words — catches controls rendered as bare divs, which the
+        tag-scoped matchers miss (observed live: the results-view 'Actions'
+        dropdown is not a button/span). Among sibling matches, the LAST in
+        document order wins (later panels overlay earlier headers)."""
+
+        try:
+            return self.page.evaluate(
+                """(words) => {
+                    const hits = [];
+                    for (const el of document.querySelectorAll('body *')) {
+                        const r = el.getBoundingClientRect();
+                        if (r.width === 0 || r.height === 0) continue;
+                        const t = (el.innerText || '').replace(/\\s+/g,' ').trim();
+                        if (t && t.length < 40 && words.every(w =>
+                                t.toLowerCase().includes(w.toLowerCase())))
+                            hits.push(el);
+                    }
+                    const deep = hits.filter(el =>
+                        !hits.some(m => m !== el && el.contains(m)));
+                    if (!deep.length) return '';
+                    const el = deep[deep.length - 1];
+                    el.click();
+                    return el.tagName.toLowerCase() + ':' +
+                        (el.innerText || '').replace(/\\s+/g,' ').trim().slice(0, 40);
+                }""", words) or ""
+        except Exception:  # noqa: BLE001
+            return ""
+
+    def text_probe(self, needle: str, limit: int = 10) -> list:
+        """Diagnostic: every element whose OWN text nodes contain ``needle``,
+        with tag/class/visibility — pinpoints how a control really renders
+        when all the clickers miss. Never raises."""
+
+        try:
+            return self.page.evaluate(
+                """([needle, limit]) => {
+                    const out = [];
+                    for (const el of document.querySelectorAll('body *')) {
+                        const own = [...el.childNodes]
+                            .filter(n => n.nodeType === 3)
+                            .map(n => n.textContent).join(' ')
+                            .replace(/\\s+/g, ' ').trim();
+                        if (!own.toLowerCase().includes(needle.toLowerCase()))
+                            continue;
+                        const r = el.getBoundingClientRect();
+                        out.push({tag: el.tagName.toLowerCase(),
+                                  cls: String(el.className || '').slice(0, 60),
+                                  text: own.slice(0, 40),
+                                  visible: r.width > 0 && r.height > 0});
+                        if (out.length >= limit) break;
+                    }
+                    return out;
+                }""", [needle, limit])
+        except Exception:  # noqa: BLE001
+            return []
+
     def download_by_words(self, words: list, dest_dir: str) -> str:
         """Arm the download listener and JS-click the element matching
         ``words`` (the CSV/confirm control in an export menu)."""
