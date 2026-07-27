@@ -456,6 +456,70 @@ class PlaywrightPageDriver:
         except Exception:  # noqa: BLE001
             return False
 
+    def react_probe(self, css: str) -> list:
+        """Read the React props attached to an element, its ancestors and
+        children — lists the 'on*' handler names each one really has, ending
+        the guessing about which event the component listens to."""
+
+        try:
+            return self.page.evaluate(
+                """(css) => {
+                    const out = [];
+                    const el = document.querySelector(css);
+                    if (!el) return out;
+                    const inspect = (node, label) => {
+                        if (!node || node.nodeType !== 1) return;
+                        const pk = Object.keys(node).find(k =>
+                            k.startsWith('__reactProps$'));
+                        const props = pk ? node[pk] : null;
+                        out.push({label, tag: node.tagName.toLowerCase(),
+                                  cls: String(node.className || '')
+                                      .slice(0, 50),
+                                  handlers: props ? Object.keys(props)
+                                      .filter(k => k.startsWith('on')) : []});
+                    };
+                    inspect(el, 'self');
+                    let p = el.parentElement;
+                    for (let i = 0; i < 3 && p; i++, p = p.parentElement)
+                        inspect(p, 'parent' + (i + 1));
+                    [...el.children].forEach((c, i) =>
+                        inspect(c, 'child' + i));
+                    return out;
+                }""", css)
+        except Exception:  # noqa: BLE001
+            return []
+
+    def react_invoke(self, css: str, handler: str) -> str:
+        """Call a React prop handler DIRECTLY (fake synthetic event) on the
+        element or its nearest ancestor that has it — sidesteps all event
+        plumbing. Returns what was invoked ('no-handler' / 'no-el')."""
+
+        try:
+            return self.page.evaluate(
+                """([css, name]) => {
+                    let node = document.querySelector(css);
+                    if (!node) return 'no-el';
+                    for (let i = 0; i < 4 && node; i++,
+                         node = node.parentElement) {
+                        const pk = Object.keys(node).find(k =>
+                            k.startsWith('__reactProps$'));
+                        const props = pk ? node[pk] : null;
+                        if (props && typeof props[name] === 'function') {
+                            const el = document.querySelector(css);
+                            const ev = {preventDefault() {},
+                                        stopPropagation() {}, persist() {},
+                                        nativeEvent: {}, target: el,
+                                        currentTarget: node, button: 0};
+                            props[name](ev);
+                            return 'invoked:' + name + '@' +
+                                node.tagName.toLowerCase();
+                        }
+                    }
+                    return 'no-handler';
+                }""", [css, handler]) or "no-handler"
+        except Exception:  # noqa: BLE001
+            return "error"
+
     def dispatch_pointer_sequence(self, css: str) -> bool:
         """Full SYNTHETIC pointer gesture (pointerdown -> mousedown ->
         pointerup -> mouseup -> click) on an element — components that open

@@ -432,19 +432,24 @@ def run_pull_v2(driver, config: BrowserConfig, county: str, state: str, *,
     # MutationObserver over the WHOLE battery: a menu that mounts and
     # unmounts inside one gesture still gets its text recorded.
     getattr(driver, "watch_dom_start", lambda: None)()
+    # what does the component ACTUALLY listen to? (ends the event guessing)
+    report["react_probe"] = getattr(driver, "react_probe", lambda c: [])(
+        toggle_css)
     openers = (
         ("real_click", lambda: getattr(driver, "real_click_css",
                                        lambda c: False)(toggle_css)),
-        ("synthetic_seq", lambda: getattr(driver, "dispatch_pointer_sequence",
-                                          lambda c: False)(toggle_css)),
+        ("react:onClick", lambda: getattr(driver, "react_invoke",
+                                          lambda c, n: "")(toggle_css,
+                                                           "onClick")),
+        ("react:onMouseDown", lambda: getattr(driver, "react_invoke",
+                                              lambda c, n: "")(toggle_css,
+                                                               "onMouseDown")),
+        ("react:onPointerDown", lambda: getattr(
+            driver, "react_invoke", lambda c, n: "")(toggle_css,
+                                                     "onPointerDown")),
         ("key:Enter", lambda: getattr(driver, "focus_and_key",
                                       lambda c, k: False)(toggle_css,
                                                           "Enter")),
-        ("key:Space", lambda: getattr(driver, "focus_and_key",
-                                      lambda c, k: False)(toggle_css, " ")),
-        ("key:ArrowDown", lambda: getattr(driver, "focus_and_key",
-                                          lambda c, k: False)(toggle_css,
-                                                              "ArrowDown")),
     )
     for name, attempt in openers:
         ok = attempt()
@@ -481,8 +486,9 @@ def run_pull_v2(driver, config: BrowserConfig, county: str, state: str, *,
              f"closed itself; captured items: {transient} "
              if transient else
              "Actions menu never surfaced under any gesture (real click, "
-             "synthetic sequence, keyboard, hold) — ")
-            + f"attempts: {attempts} mutations: {muts}")
+             "react handlers, keyboard, hold) — ")
+            + f"attempts: {attempts} mutations: {muts} "
+            + f"toggle: {toggle_css} react: {report['react_probe']}")
     log(f"[pull-v2] Actions menu opened ({mode}) — items: {menu_texts}")
 
     # map the real labels (whatever they are) to the flow's needs
