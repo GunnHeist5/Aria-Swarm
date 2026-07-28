@@ -863,26 +863,12 @@ def run_pull_v2(driver, config: BrowserConfig, county: str, state: str, *,
     report["after_save"] = save_diff[:25]
     log(f"[pull-v2] Save dialog: {save_diff[:15]}")
 
-    # SKIP TRACE (real money, per record) — only on the explicit flag, and
-    # only under the row cap already enforced above.
-    if config.run_skiptrace:
-        label = next((t for t in save_diff if "skip trace" in t.lower()),
-                     "Skip Trace Selected Properties")
-        log(f"[pull-v2] skip tracing {selected:,} records (BILLABLE)")
-        res = _click_item(label)
-        attempts.append(f"skiptrace:{res or 'miss'}")
-        if not res:
-            raise VerificationError(
-                f"could not click {label!r} — dialog: {save_diff}")
-        wait(3000)
-        _detect_challenge(driver)
-        report["after_skiptrace"] = [t for t in _texts()
-                                     if t not in before][:25]
-        getattr(driver, "screenshot", lambda *_: "")("pull-v2-skiptrace")
-        log(f"[pull-v2] skip trace screen: {report['after_skiptrace'][:12]}")
-        raise VerificationError(
-            "skip-trace dialog reached — confirm step not yet calibrated; "
-            f"screen: {report['after_skiptrace']}")
+    # NOTE: the search grid also offers 'Skip Trace Selected Properties'
+    # here, but that path was never calibrated and its order dialog differs.
+    # Skip tracing belongs to run_skiptrace_list, which drives the CALIBRATED
+    # dialog (order summary, terms, Place Order) against the saved list. A
+    # pull therefore always takes the list path below; config.run_skiptrace
+    # is honoured by run_skiptrace_list, not here.
 
     # LIST PATH (free): Add to Marketing List -> name it -> confirm. The
     # export itself lives in My Properties on the saved list.

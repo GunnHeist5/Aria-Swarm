@@ -82,8 +82,12 @@ def run_county(county: str, state: str, *, config, username: str, password: str,
         log(f"[pipeline] {name}" + (f" {extra}" if extra else ""))
 
     # ---- 1. pull + save the list -----------------------------------------
-    with driver_factory(config) as driver:
-        pull = flow.run_pull_v2(driver, config, county, state,
+    # The pull NEVER skip traces: the grid's own trace path is uncalibrated,
+    # and tracing belongs to run_skiptrace_list against the saved list.
+    pull_config = config.mutate(run_skiptrace=False) \
+        if hasattr(config, "mutate") else config
+    with driver_factory(pull_config) as driver:
+        pull = flow.run_pull_v2(driver, pull_config, county, state,
                                 username=username, password=password,
                                 recipe_steps=recipe_steps,
                                 lot_min_sqft=None if recipe_steps else 5000,
