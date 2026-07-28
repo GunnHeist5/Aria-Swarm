@@ -137,6 +137,36 @@ class PlaywrightPageDriver:
             self.page.keyboard.press("Delete")
             self.page.keyboard.type(str(value), delay=30)
 
+    def read_labeled_range(self, label: str) -> list:
+        """Current VALUES of the two inputs following a filter label.
+
+        Cannot go by placeholder: the app drops the placeholder attribute
+        once an input has a value (that is what made the fill look fine
+        while the filter had not taken). Walks the label's ancestors until
+        it finds a container holding inputs, then reads them in order."""
+
+        try:
+            return self.page.evaluate(
+                """(label) => {
+                    let anchor = null;
+                    for (const el of document.querySelectorAll('body *')) {
+                        const t = (el.innerText || '')
+                            .replace(/\\s+/g, ' ').trim();
+                        if (t === label) anchor = el;   // last match = deepest
+                    }
+                    if (!anchor) return [];
+                    let node = anchor;
+                    for (let i = 0; i < 5 && node; i++, node = node.parentElement) {
+                        const inputs = node.querySelectorAll('input');
+                        if (inputs.length >= 2)
+                            return [...inputs].slice(0, 2).map(
+                                i => (i.value || '').trim());
+                    }
+                    return [];
+                }""", label) or []
+        except Exception:  # noqa: BLE001
+            return []
+
     def press_key(self, key: str) -> None:
         self.page.keyboard.press(key)
 

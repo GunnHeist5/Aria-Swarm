@@ -663,10 +663,32 @@ def run_pull_v2(driver, config: BrowserConfig, county: str, state: str, *,
             raise VerificationError(
                 "Vacant Land classification did not apply (sub-chips never "
                 "appeared) — refusing to pull the wrong property class")
+    # Recipe ranges, each VERIFIED by reading the inputs back. Proven
+    # necessary live: the same brazoria recipe returned 8,487 on one run and
+    # 28,995 on the next — a range silently failed to take, and only the row
+    # cap caught it. A filter that will not stick fails the pull closed
+    # rather than pulling the wrong universe.
+    report["filters"] = applied = {}
     for label, min_v, max_v in recipe_steps:
-        getattr(driver, "fill_labeled_range", lambda *a, **k: None)(
-            label, min_v, max_v)
-        getattr(driver, "press_key", lambda k: None)("Tab")
+        want = [str(v) if v is not None else "" for v in (min_v, max_v)]
+        got: list = []
+        for _ in range(2):
+            getattr(driver, "fill_labeled_range", lambda *a, **k: None)(
+                label, min_v, max_v)
+            getattr(driver, "press_key", lambda k: None)("Tab")
+            wait(900)
+            got = [str(v).replace(",", "").replace("$", "").strip()
+                   for v in getattr(driver, "read_labeled_range",
+                                    lambda _l: [])(label)]
+            if all(w == "" or w in got for w in want):
+                break
+        applied[label] = got
+        if not all(w == "" or w in got for w in want):
+            getattr(driver, "screenshot", lambda *_: "")("pull-v2-filter-miss")
+            raise VerificationError(
+                f"filter {label!r} did not stick (wanted {want}, inputs read "
+                f"{got}) — refusing to pull an unfiltered universe")
+    log(f"[pull-v2] filters verified: {applied}")
     if lot_min_sqft:
         getattr(driver, "fill_labeled_range", lambda *a, **k: None)(
             "Lot Size (SqFt)", lot_min_sqft, None)
