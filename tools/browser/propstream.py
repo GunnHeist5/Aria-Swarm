@@ -332,20 +332,21 @@ def _open_saved_list(driver, config: BrowserConfig, list_name: str, *,
 
 
 def _select_all_best_effort(driver, wait, log, tag: str) -> str:
-    """Click the grid's header checkbox and report whatever selection
-    marker the view shows. The list view's counter wording is unknown, so
-    this NEVER blocks the flow — toolbar actions may well apply to the
-    whole list — but a selection is required by some of them."""
+    """Select every row via the grid's HEADER checkbox (screenshot-proven:
+    the first DOM checkbox belongs to the hidden column-picker, and the real
+    inputs are zero-size styled components — so click the topmost visible
+    wrapper by coordinates). Reports the enabling effect on the toolbar,
+    which is the reliable signal here: PropStream greys Export until rows
+    are selected."""
 
-    import re
-
-    hit = getattr(driver, "click_first_checkbox", lambda: "")()
-    wait(2000)
-    txt = getattr(driver, "page_text", lambda *_: "")(4000)
-    m = re.search(r"([\d,]+)\s*(SELECTED|selected|Selected)", txt or "")
-    marker = m.group(0) if m else ""
-    log(f"[{tag}] select-all: checkbox={hit or 'none'} marker={marker or 'none'}")
-    return marker
+    box = getattr(driver, "click_grid_header_checkbox", lambda: {})()
+    if not box:
+        box = {"fallback": getattr(driver, "click_first_checkbox",
+                                   lambda: "")()}
+    wait(2500)
+    enabled = getattr(driver, "enabled_button_texts", list)(30)
+    log(f"[{tag}] select-all: clicked {box} -> enabled: {enabled}")
+    return ", ".join(enabled)
 
 
 def _wait_for_new_ui(driver, wait, before: set, tries: int = 8) -> list:
@@ -469,6 +470,15 @@ def run_export_list(driver, config: BrowserConfig, list_name: str, *,
     dest_dir = str(Path(config.download_dir).expanduser())
     texts = getattr(driver, "visible_own_texts", lambda *_: [])
     report["selection"] = _select_all_best_effort(driver, wait, log, "export")
+    # Export is greyed until rows are selected (screenshot-proven) — clicking
+    # a disabled control is the silent no-op we chased for several runs
+    enabled = getattr(driver, "enabled_button_texts", list)(30)
+    report["enabled_buttons"] = enabled
+    if not any("export" in t.lower() for t in enabled):
+        getattr(driver, "screenshot", lambda *_: "")("export-disabled")
+        raise VerificationError(
+            "Export is still disabled after select-all — enabled controls: "
+            f"{enabled}")
     before = set(texts())
     exported = getattr(driver, "try_download_click", lambda *a, **k: "")(
         "Export", dest_dir, 25000)

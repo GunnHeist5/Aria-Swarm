@@ -342,6 +342,64 @@ class PlaywrightPageDriver:
         except Exception:  # noqa: BLE001
             return ""
 
+    def click_grid_header_checkbox(self) -> dict:
+        """Trusted click on the grid's select-all box. The real <input> is
+        zero-size (styled component) and the FIRST input in the DOM belongs
+        to the hidden column-picker — so find the topmost VISIBLE checkbox
+        wrapper inside the grid and click its coordinates."""
+
+        try:
+            box = self.page.evaluate(
+                """() => {
+                    const out = [];
+                    for (const el of document.querySelectorAll(
+                            '[class*="Checkbox-style"], [class*="checkbox"]')) {
+                        const r = el.getBoundingClientRect();
+                        // small, visible, below the toolbar = a grid box
+                        if (r.width > 6 && r.height > 6 && r.width < 60 &&
+                            r.height < 60 && r.y > 100)
+                            out.push({x: r.x, y: r.y, w: r.width, h: r.height});
+                    }
+                    out.sort((a, b) => a.y - b.y || a.x - b.x);
+                    return out[0] || null;
+                }""")
+            if not box:
+                return {}
+            self.page.mouse.click(box["x"] + box["w"] / 2,
+                                  box["y"] + box["h"] / 2)
+            return box
+        except Exception:  # noqa: BLE001
+            return {}
+
+    def enabled_button_texts(self, limit: int = 30) -> list:
+        """Visible buttons that are NOT disabled — a faded/disabled toolbar
+        control (PropStream greys Export until rows are selected) must not
+        be reported as available."""
+
+        try:
+            return self.page.evaluate(
+                """(limit) => {
+                    const out = [];
+                    for (const el of document.querySelectorAll(
+                            'button, [role=button]')) {
+                        const r = el.getBoundingClientRect();
+                        if (r.width === 0 || r.height === 0) continue;
+                        if (el.disabled ||
+                            el.getAttribute('aria-disabled') === 'true')
+                            continue;
+                        const st = getComputedStyle(el);
+                        if (parseFloat(st.opacity) < 0.6 ||
+                            st.pointerEvents === 'none') continue;
+                        const t = (el.innerText || '')
+                            .replace(/\\s+/g, ' ').trim();
+                        if (t && !out.includes(t)) out.push(t.slice(0, 40));
+                        if (out.length >= limit) break;
+                    }
+                    return out;
+                }""", limit)
+        except Exception:  # noqa: BLE001
+            return []
+
     def element_context(self, css: str, limit: int = 10) -> list:
         """Each match with its position, checked/disabled state and parent
         chain classes — tells a grid's select-all checkbox apart from a
