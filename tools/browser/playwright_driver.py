@@ -342,6 +342,39 @@ class PlaywrightPageDriver:
         except Exception:  # noqa: BLE001
             return ""
 
+    def element_context(self, css: str, limit: int = 10) -> list:
+        """Each match with its position, checked/disabled state and parent
+        chain classes — tells a grid's select-all checkbox apart from a
+        sidebar filter box, and a live button from a disabled one."""
+
+        try:
+            return self.page.evaluate(
+                """([css, limit]) => {
+                    const out = [];
+                    for (const el of document.querySelectorAll(css)) {
+                        const r = el.getBoundingClientRect();
+                        const parents = [];
+                        let p = el.parentElement;
+                        for (let i = 0; i < 3 && p; i++, p = p.parentElement)
+                            parents.push(String(p.className || '').slice(0, 40));
+                        out.push({
+                            tag: el.tagName.toLowerCase(),
+                            cls: String(el.className || '').slice(0, 40),
+                            text: (el.innerText || '').replace(/\\s+/g, ' ')
+                                .trim().slice(0, 30),
+                            x: Math.round(r.x), y: Math.round(r.y),
+                            w: Math.round(r.width), h: Math.round(r.height),
+                            checked: !!el.checked,
+                            disabled: !!el.disabled ||
+                                el.getAttribute('aria-disabled') === 'true',
+                            parents});
+                        if (out.length >= limit) break;
+                    }
+                    return out;
+                }""", [css, limit])
+        except Exception:  # noqa: BLE001
+            return []
+
     def css_probe(self, css: str, limit: int = 15) -> list:
         """Diagnostic: tag/class/text/visibility of every element matching
         ``css`` — for dumping a menu's real items. Never raises."""

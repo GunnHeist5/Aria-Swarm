@@ -398,10 +398,15 @@ def run_skiptrace_list(driver, config: BrowserConfig, list_name: str, *,
         if t not in report["toolbar"]]
     if not report["dialog"] and not report["dialog_buttons"]:
         getattr(driver, "screenshot", lambda *_: "")("skiptrace-no-dialog")
+        ctx = getattr(driver, "element_context", lambda *a: [])
+        report["skiptrace_button"] = ctx(
+            'button, [role=button], [class*="dropdownToggleBtn"]', 12)
+        report["checkbox_context"] = ctx('input[type=checkbox]', 6)
         raise VerificationError(
-            "Skip Trace clicked but nothing appeared (no dialog, no new "
-            f"buttons) — selection marker: {report['selection'] or 'none'}; "
-            "the action may need rows selected or a different control")
+            "Skip Trace clicked but nothing appeared — selection marker: "
+            f"{report['selection'] or 'none'}; buttons: "
+            f"{report['skiptrace_button']}; checkboxes: "
+            f"{report['checkbox_context']}")
     getattr(driver, "screenshot", lambda *_: "")("skiptrace-dialog")
     log(f"[skiptrace] dialog: {report['dialog'][:15]}")
     log(f"[skiptrace] dialog buttons: {report['dialog_buttons']}")
