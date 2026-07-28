@@ -244,8 +244,13 @@ def _cmd_pipeline(args, config) -> int:
         return 1
 
     bconfig = load_browser_config()
+    changes = {}
     if args.no_skiptrace:
-        bconfig = bconfig.mutate(run_skiptrace=False)
+        changes["run_skiptrace"] = False
+    if args.max_rows:
+        changes["max_export_rows"] = args.max_rows
+    if changes:
+        bconfig = bconfig.mutate(**changes)
 
     steps = []
     if args.lot_min_acres or args.lot_max_acres:
@@ -605,6 +610,10 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--assessed-max", type=float, default=95000)
     p.add_argument("--years-owned-min", type=int, default=10)
     p.add_argument("--no-skiptrace", action="store_true")
+    p.add_argument("--max-rows", type=int, default=None,
+                   help="row cap for this run (default 5000). Raise it for a "
+                        "big county — the cap is a ToS/cost guardrail, not a "
+                        "plan limit")
     p.add_argument("--poll-attempts", type=int, default=None)
     p.add_argument("--poll-seconds", type=int, default=None)
     p.set_defaults(run=_cmd_pipeline)
