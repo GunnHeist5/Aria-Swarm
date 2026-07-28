@@ -429,13 +429,25 @@ def run_skiptrace_list(driver, config: BrowserConfig, list_name: str, *,
         log("[skiptrace] DRY RUN — confirm dialog captured, nothing started")
         return report
 
-    # confirm: prefer the dialog's own controls, then the usual labels
+    # Order summary is calibrated live: Selected/Eligible Contacts, Price
+    # Per Match, Subtotal, Free Skip Trace Credits, total — log it so the
+    # actual charge is always in the record before anything is placed.
+    report["order_summary"] = [t for t in report["dialog"]
+                               if any(k in t.lower() for k in
+                                      ("contact", "price", "subtotal",
+                                       "credit", "$"))]
+    log(f"[skiptrace] ORDER: {report['order_summary']}")
+
+    # confirm: the dialog's own affirmative control (never Cancel/Close),
+    # clicked by coordinates — the mechanism this app actually honours
     for label in (report["dialog_buttons"] or []) + [
-            "Skip Trace", "Continue", "Confirm", "Start", "Yes", "OK"]:
+            "Place Order", "Confirm", "Continue", "Start", "Yes", "OK"]:
         if label.lower() in ("cancel", "close", "no"):
             continue
-        if _click_text_robust(driver, label):
+        if (getattr(driver, "click_text_at_coords", lambda t: {})(label)
+                or _click_text_robust(driver, label)):
             report["confirmed_via"] = label
+            log(f"[skiptrace] placed the order via {label!r}")
             break
     else:
         raise VerificationError(
