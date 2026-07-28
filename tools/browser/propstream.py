@@ -298,18 +298,22 @@ def _open_saved_list(driver, config: BrowserConfig, list_name: str, *,
     if not _click_text_robust(driver, "My Properties"):
         raise VerificationError("could not reach My Properties")
     wait(5000)
-    report["screen"] = getattr(driver, "visible_own_texts",
-                               lambda *_: [])()[:30]
-    if list_name not in report["screen"]:
+    # scan the WHOLE sidebar, report a slice: the first 30 texts are nav
+    # chrome, so a list further down the sidebar (Putnam, Waller) looked
+    # "missing" when the check ran against the truncated view
+    all_texts = getattr(driver, "visible_own_texts", lambda *_: [])()
+    report["screen"] = all_texts[:40]
+    report["lists_seen"] = [t for t in all_texts if t.strip()
+                            and not t.startswith("(")][:40]
+    if list_name not in all_texts:
         # a UTC date rollover must not orphan yesterday's list: fall back to
         # the newest list sharing this prefix (aria-{county}-{state}-)
         prefix = list_name.rsplit("-", 1)[0] + "-"
-        matches = sorted(t for t in report["screen"]
-                         if t.startswith(prefix))
+        matches = sorted(t for t in all_texts if t.startswith(prefix))
         if not matches:
             raise VerificationError(
                 f"saved list {list_name!r} is not in My Properties — lists on "
-                f"screen: {report['screen']}")
+                f"screen: {report['lists_seen']}")
         list_name = matches[-1]
         report["list_name"] = list_name
         log(f"[list] exact name absent; using newest match {list_name!r}")
