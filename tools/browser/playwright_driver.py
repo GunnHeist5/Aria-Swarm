@@ -342,6 +342,31 @@ class PlaywrightPageDriver:
         except Exception:  # noqa: BLE001
             return ""
 
+    def adopt_new_page(self) -> str:
+        """If the last click opened a NEW tab (PropStream does this for some
+        actions), switch this driver onto it and return its URL. '' when no
+        extra tab exists. A silent 'nothing happened' on the original page
+        is exactly what a popup tab looks like from here."""
+
+        try:
+            pages = self.page.context.pages
+            if len(pages) < 2:
+                return ""
+            newest = pages[-1]
+            if newest is self.page:
+                return ""
+            newest.wait_for_load_state("domcontentloaded", timeout=15000)
+            self.page = newest
+            return newest.url
+        except Exception:  # noqa: BLE001
+            return ""
+
+    def page_urls(self) -> list:
+        try:
+            return [p.url for p in self.page.context.pages]
+        except Exception:  # noqa: BLE001
+            return []
+
     def click_grid_header_checkbox(self) -> dict:
         """Trusted click on the grid's select-all box. The real <input> is
         zero-size (styled component) and the FIRST input in the DOM belongs

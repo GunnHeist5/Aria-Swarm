@@ -390,8 +390,17 @@ def run_skiptrace_list(driver, config: BrowserConfig, list_name: str, *,
                                                   "skiptrace")
 
     before = set(texts())
+    report["pages_before"] = getattr(driver, "page_urls", list)()
     if not _click_text_robust(driver, "Skip Trace"):
         raise VerificationError("could not click Skip Trace")
+    wait(3000)
+    # the action may open a NEW TAB rather than a modal
+    opened_url = getattr(driver, "adopt_new_page", lambda: "")()
+    if opened_url:
+        report["new_tab"] = opened_url
+        log(f"[skiptrace] followed a new tab: {opened_url}")
+        wait(3000)
+        before = set()  # everything on the new tab is new
     _detect_challenge(driver)
     report["dialog"] = _wait_for_new_ui(driver, wait, before)[:25]
     report["dialog_buttons"] = [
@@ -399,15 +408,13 @@ def run_skiptrace_list(driver, config: BrowserConfig, list_name: str, *,
         if t not in report["toolbar"]]
     if not report["dialog"] and not report["dialog_buttons"]:
         getattr(driver, "screenshot", lambda *_: "")("skiptrace-no-dialog")
-        ctx = getattr(driver, "element_context", lambda *a: [])
-        report["skiptrace_button"] = ctx(
-            'button, [role=button], [class*="dropdownToggleBtn"]', 12)
-        report["checkbox_context"] = ctx('input[type=checkbox]', 6)
+        report["pages_after"] = getattr(driver, "page_urls", list)()
+        report["visible_now"] = getattr(driver, "enabled_button_texts",
+                                        list)(30)
         raise VerificationError(
-            "Skip Trace clicked but nothing appeared — selection marker: "
-            f"{report['selection'] or 'none'}; buttons: "
-            f"{report['skiptrace_button']}; checkboxes: "
-            f"{report['checkbox_context']}")
+            "Skip Trace clicked but nothing appeared — tabs: "
+            f"{report['pages_after']}; enabled controls now: "
+            f"{report['visible_now']}")
     getattr(driver, "screenshot", lambda *_: "")("skiptrace-dialog")
     log(f"[skiptrace] dialog: {report['dialog'][:15]}")
     log(f"[skiptrace] dialog buttons: {report['dialog_buttons']}")
