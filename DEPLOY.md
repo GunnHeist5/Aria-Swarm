@@ -192,7 +192,19 @@ skip the trace with `--no-skiptrace`, tune the wait with
 `--poll-attempts/--poll-seconds` (default: 8 exports, 4 min apart —
 observed live: 694 records traced in <10 min, 4,475 in <1 h).
 
-`/etc/systemd/system/aria-acquire.service`:
+Install the timers with the shipped script — it writes both unit files and
+staggers the counties one per weekday (so a day never runs two pulls):
+
+```bash
+sudo scripts/install-acquire-timer.sh galveston brazoria chambers liberty
+systemctl list-timers 'aria-acquire@*'
+journalctl -u 'aria-acquire@*' -f
+```
+
+Knobs: `STATE=tx HOUR=08 MAX_ROWS=10000 REPO=/root/Aria-Swarm`.
+
+The units it writes, for reference —
+`/etc/systemd/system/aria-acquire@.service`:
 
 ```ini
 [Unit]
