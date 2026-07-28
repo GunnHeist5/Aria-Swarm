@@ -945,11 +945,8 @@ def run_pull_v2(driver, config: BrowserConfig, county: str, state: str, *,
             "list modal did not close after Save — screen: "
             f"{report['after_list_save']} attempts: {attempts}")
     log(f"[pull-v2] SAVED {selected:,} properties to list {list_name!r}")
-
-    # The CSV export lives in My Properties on the saved list and is not
-    # calibrated yet. Stop with the selection safely persisted (nothing
-    # billable spent) rather than driving an unproven flow.
-    raise VerificationError(
-        f"selection saved to list {list_name!r} ({selected:,} properties) — "
-        "the My Properties export leg is not automated yet; after-save "
-        f"screen: {report['after_list_save']}")
+    # The pull ENDS at the saved list — deliberately. Skip trace and the CSV
+    # export are separate calibrated flows against that list
+    # (run_skiptrace_list / run_export_list), which is also what lets the
+    # pipeline wait for a trace to land between them.
+    return report
