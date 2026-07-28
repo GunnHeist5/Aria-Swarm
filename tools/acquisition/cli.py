@@ -226,6 +226,67 @@ def _cmd_review(args, config) -> int:
     return 0
 
 
+def _cmd_pipeline(args, config) -> int:
+    """pull -> skip trace -> wait for contacts -> export -> ledger, per
+    county. Never enrolls: the batch waits for a human `enroll --push`."""
+
+    import json
+
+    from ..browser.config import load_config as load_browser_config
+    from ..integrations.secrets import SecretError, get_secret
+    from . import pipeline as pipeline_mod
+
+    try:
+        username = get_secret("PROPSTREAM_USERNAME", required=True)
+        password = get_secret("PROPSTREAM_PASSWORD", required=True)
+    except SecretError as exc:
+        print(f"[pipeline] {exc}")
+        return 1
+
+    bconfig = load_browser_config()
+    if args.no_skiptrace:
+        bconfig = bconfig.mutate(run_skiptrace=False)
+
+    steps = []
+    if args.lot_min_acres or args.lot_max_acres:
+        steps.append(("Lot Size (SqFt)",
+                      int(args.lot_min_acres * 43560) if args.lot_min_acres
+                      else None,
+                      int(args.lot_max_acres * 43560) if args.lot_max_acres
+                      else None))
+    if args.assessed_min or args.assessed_max:
+        steps.append(("Assessed Total Value", args.assessed_min,
+                      args.assessed_max))
+    if args.years_owned_min:
+        steps.append(("Years of Ownership", args.years_owned_min, None))
+
+    kwargs = {}
+    if args.poll_attempts is not None:
+        kwargs["poll_attempts"] = args.poll_attempts
+    if args.poll_seconds is not None:
+        kwargs["poll_seconds"] = args.poll_seconds
+
+    rc, reports = 0, []
+    for county in [c.strip() for c in args.county.split(",") if c.strip()]:
+        try:
+            reports.append(pipeline_mod.run_county(
+                county, args.state, config=bconfig, username=username,
+                password=password, recipe_steps=steps,
+                skiptrace=not args.no_skiptrace, **kwargs))
+        except Exception as exc:  # noqa: BLE001 — one county must not sink the rest
+            print(f"[pipeline] {county}/{args.state} FAILED: {exc}")
+            reports.append({"county": county, "state": args.state,
+                            "error": str(exc)})
+            rc = 1
+    print(json.dumps(reports, indent=2, default=str))
+    total_new = sum((r.get("ingested") or {}).get("inserted", 0)
+                    for r in reports)
+    print(f"\n[pipeline] {total_new} new leads in the ledger. Nothing was "
+          "enrolled — review with `acquire enroll --include-unscreened` "
+          "and add --push to send.")
+    return rc
+
+
 def _cmd_pull(args, config) -> int:
     from . import ledger as ledger_mod
     from .pull.recipes import get_recipe, manual_checklist
@@ -530,6 +591,23 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--plan", action="store_true",
                    help="print the recipe plan + quota headroom; no browser")
     p.set_defaults(run=_cmd_pull)
+
+    p = sub.add_parser("pipeline",
+                       help="One county end to end: pull -> skip trace -> "
+                            "wait for contacts -> export -> ledger "
+                            "(never enrolls; that stays a human push)")
+    p.add_argument("--county", required=True,
+                   help="one county, or a comma-separated list")
+    p.add_argument("--state", default="tx")
+    p.add_argument("--lot-min-acres", type=float, default=0.25)
+    p.add_argument("--lot-max-acres", type=float, default=2.0)
+    p.add_argument("--assessed-min", type=float, default=30000)
+    p.add_argument("--assessed-max", type=float, default=95000)
+    p.add_argument("--years-owned-min", type=int, default=10)
+    p.add_argument("--no-skiptrace", action="store_true")
+    p.add_argument("--poll-attempts", type=int, default=None)
+    p.add_argument("--poll-seconds", type=int, default=None)
+    p.set_defaults(run=_cmd_pipeline)
 
     p = sub.add_parser("counties", help="Expansion scorecard (agent "
                                         "recommends; human picks)")

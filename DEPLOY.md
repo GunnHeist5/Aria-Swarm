@@ -171,12 +171,76 @@ For any `[MISSING]` key, view its screenshot, then set that key in
 you can even commit it and `git pull`) and re-run `--check` until `RESULT: OK`.
 Then the `pull` command above works, unattended.
 
-Scheduled daily pull — `/etc/systemd/system/aria-propstream.service` (Type=oneshot,
-`EnvironmentFile=/root/Aria-Swarm/.env`, `Environment=PLAYWRIGHT_BROWSERS_PATH=/root/.automaton/ms-playwright`,
-`ExecStart=/root/Aria-Swarm/.venv/bin/python -m tools.browser.cli pull --county harris --state tx`)
-plus `aria-propstream.timer` (`OnCalendar=*-*-* 09:00`, `RandomizedDelaySec=1800`).
-Then `systemctl enable --now aria-propstream.timer`. A CAPTCHA/2FA wall freezes and
-pings Telegram; re-run `seed-login` to refresh the session.
+### Scheduled acquisition (the whole county, unattended)
+
+`acquire pipeline` runs one or more counties end to end — pull → save list →
+skip trace → **poll until the traced contacts actually land** → export →
+ledger. It never enrolls: outreach stays a human `enroll --push`.
+
+```bash
+# one county, by hand first
+.venv/bin/python -m tools.acquisition.cli pipeline --county galveston --state tx
+
+# several, comma separated (one failure never sinks the rest)
+.venv/bin/python -m tools.acquisition.cli pipeline \
+    --county brazoria,fort\ bend,chambers --state tx
+```
+
+Defaults match the calibrated recipe (0.25–2 acres, $30–95k assessed, 10+
+years owned); override with `--lot-min-acres/--assessed-max/--years-owned-min`,
+skip the trace with `--no-skiptrace`, tune the wait with
+`--poll-attempts/--poll-seconds` (default: 8 exports, 4 min apart —
+observed live: 694 records traced in <10 min, 4,475 in <1 h).
+
+`/etc/systemd/system/aria-acquire.service`:
+
+```ini
+[Unit]
+Description=ARIA acquisition — pull, skip trace, export, ledger
+After=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/root/Aria-Swarm
+EnvironmentFile=/root/Aria-Swarm/.env
+Environment=PLAYWRIGHT_BROWSERS_PATH=/root/.automaton/ms-playwright
+ExecStart=/root/Aria-Swarm/.venv/bin/python -m tools.acquisition.cli \
+    pipeline --county %i --state tx
+TimeoutStartSec=3600
+```
+
+`/etc/systemd/system/aria-acquire.timer`:
+
+```ini
+[Unit]
+Description=Daily ARIA county pull
+
+[Timer]
+OnCalendar=*-*-* 08:00
+RandomizedDelaySec=1800
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+```
+
+```bash
+sudo systemctl enable --now aria-acquire@galveston.timer   # per county
+journalctl -u 'aria-acquire@*' -f                          # watch a run
+```
+
+Run **one county per day** rather than a batch: it keeps PropStream usage at a
+human cadence, and the morning's enrollment batch stays a size you can review.
+A CAPTCHA/2FA wall freezes the run and pings Telegram; re-run `seed-login` to
+refresh the session.
+
+Each morning the operator's whole job is:
+
+```bash
+.venv/bin/python -m tools.acquisition.cli enroll --include-unscreened   # review
+.venv/bin/python -m tools.acquisition.cli enroll --include-unscreened --push
+.venv/bin/python -m tools.acquisition.cli review list                   # reply drafts
+```
 
 ---
 
