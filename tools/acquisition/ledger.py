@@ -276,15 +276,34 @@ def ingest_rows(rows: list[dict], *, source_list: str,
                 report["inserted"] += 1
             else:
                 report["duplicate"] += 1
-                # Contact backfill for rows ingested before the emails
-                # column existed: enrich ONLY missing contact data — status
-                # and everything human-set stays untouched (first wins).
-                if all_emails:
+                # CONTACT BACKFILL — the re-ingest path that matters: a lead
+                # pulled before skip trace has no contacts, and the traced
+                # re-export must fill them in. Enrich ONLY missing contact
+                # fields; status and everything human-set stays untouched.
+                #
+                # Both halves of this were wrong once and cost a live batch:
+                #  * the guard tested `emails IS NULL`, but a contact-less
+                #    ingest stores '[]' — so it never matched;
+                #  * only emails/email2 were written, never the primary
+                #    `email` column that enrollment eligibility reads, so
+                #    traced leads stayed unenrollable.
+                phones = _phones(row)
+                if all_emails or phones:
                     fixed = conn.execute(
-                        "UPDATE leads SET emails=?, updated_at=?, "
-                        "email2=COALESCE(email2, ?) "
-                        "WHERE county_key=? AND apn=? AND emails IS NULL",
-                        (json.dumps(all_emails), now, email2, ckey, apn))
+                        "UPDATE leads SET "
+                        "  email = COALESCE(NULLIF(email, ''), ?), "
+                        "  email2 = COALESCE(NULLIF(email2, ''), ?), "
+                        "  emails = CASE WHEN emails IS NULL OR emails = '[]' "
+                        "             THEN ? ELSE emails END, "
+                        "  phones = CASE WHEN phones IS NULL OR phones = '' "
+                        "             OR phones = '[]' THEN ? ELSE phones END, "
+                        "  updated_at = ? "
+                        "WHERE county_key=? AND apn=? AND ("
+                        "  (? IS NOT NULL AND (email IS NULL OR email = '')) "
+                        "  OR emails IS NULL OR emails = '[]' "
+                        "  OR phones IS NULL OR phones = '' OR phones = '[]')",
+                        (email, email2, json.dumps(all_emails), phones, now,
+                         ckey, apn, email))
                     if fixed.rowcount:
                         report["contacts_backfilled"] = \
                             report.get("contacts_backfilled", 0) + 1

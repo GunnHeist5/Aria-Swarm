@@ -282,3 +282,49 @@ if __name__ == "__main__":
                 failures += 1
                 print(f"FAIL {name}: {exc}")
     raise SystemExit(1 if failures else 0)
+
+
+def test_skiptrace_reingest_backfills_contacts_and_unlocks_enrollment(tmp_path):
+    """The live pull order: pull a county BEFORE skip trace (no contacts),
+    then re-ingest the traced export. The second ingest must fill the
+    contact fields — including the primary `email` that enrollment reads —
+    without creating duplicates or touching status.
+
+    Regression: the guard tested `emails IS NULL` while a contact-less
+    ingest stores '[]', and only emails/email2 were written, never `email`.
+    4,094 traced Harris emails stayed unenrollable because of it.
+    """
+
+    _env_db(tmp_path)
+    # 1. pre-trace pull: no email, no phone
+    pre = _row(email="", **{"Phone 1": "", "Phone 1 DNC": ""})
+    r1 = ledger.ingest_rows([pre], source_list="harris_pull")
+    assert r1["inserted"] == 1
+    assert not enroll_mod.eligible_leads(include_unscreened=True), \
+        "a contact-less lead must not be enrollable"
+
+    # 2. traced re-export of the SAME parcel, now carrying contacts
+    traced = _row(email="owner@x.com", **{"Email 2": "alt@x.com",
+                                          "Phone 1": "555-0199"})
+    r2 = ledger.ingest_rows([traced], source_list="harris_traced")
+    assert r2["inserted"] == 0 and r2["duplicate"] == 1, "no duplicate rows"
+    assert r2.get("contacts_backfilled") == 1
+
+    rows = enroll_mod.eligible_leads(include_unscreened=True)
+    assert [r["email"] for r in rows] == ["owner@x.com"], \
+        "traced contacts must make the existing lead enrollable"
+    lead = ledger.find_leads(email="owner@x.com")[0]
+    assert lead["status"] == "new", "backfill must never move status"
+    assert "alt@x.com" in (lead["emails"] or "")
+    assert "555-0199" in (lead["phones"] or "")
+
+
+def test_backfill_never_overwrites_existing_contacts(tmp_path):
+    """First ingest wins for data that is already there."""
+
+    _env_db(tmp_path)
+    ledger.ingest_rows([_row(email="first@x.com")], source_list="a")
+    ledger.ingest_rows([_row(email="second@x.com")], source_list="b")
+    lead = ledger.find_leads(email="first@x.com")
+    assert lead and lead[0]["email"] == "first@x.com"
+    assert not ledger.find_leads(email="second@x.com")
