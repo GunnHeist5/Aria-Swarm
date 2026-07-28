@@ -452,13 +452,25 @@ def run_skiptrace_list(driver, config: BrowserConfig, list_name: str, *,
     else:
         raise VerificationError(
             f"no confirm control in the skip-trace dialog: {report['dialog']}")
-    wait(6000)
+    wait(8000)
     _detect_challenge(driver)
     report["after"] = [t for t in texts() if t not in before][:25]
-    report["started"] = True
     getattr(driver, "screenshot", lambda *_: "")("skiptrace-started")
-    log(f"[skiptrace] started via {report['confirmed_via']!r} — screen: "
-        f"{report['after'][:12]}")
+
+    # Did the order actually submit? The dialog closing is the signal. NEVER
+    # re-click Place Order to "make sure" — that risks a second order.
+    still_open = getattr(driver, "any_text_visible", lambda t: False)(
+        "Place Order")
+    report["started"] = not still_open
+    report["dialog_closed"] = not still_open
+    if still_open:
+        log("[skiptrace] WARNING: the order dialog is still on screen — the "
+            "order may NOT have submitted. Not re-clicking (double-order "
+            "risk). Verify in the list's Skip Traces column, then re-run if "
+            "the trace never lands.")
+    else:
+        log(f"[skiptrace] order submitted via {report['confirmed_via']!r} "
+            "(dialog closed)")
     return report
 
 
