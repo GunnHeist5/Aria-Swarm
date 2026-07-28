@@ -342,6 +342,49 @@ class PlaywrightPageDriver:
         except Exception:  # noqa: BLE001
             return ""
 
+    def tick_modal_checkboxes(self) -> list:
+        """Tick every UNCHECKED checkbox inside the open modal — order
+        dialogs gate their submit button behind a terms/DNC agreement box.
+        Styled checkboxes hide the real input, so click the visible wrapper
+        by coordinates. Returns what was ticked."""
+
+        done = []
+        try:
+            boxes = self.page.evaluate(
+                """() => {
+                    const modal = [...document.querySelectorAll(
+                            '[class*="Modal"], [class*="modal"], [role=dialog]')]
+                        .filter(el => {
+                            const r = el.getBoundingClientRect();
+                            return r.width > 200 && r.height > 100;
+                        }).pop();
+                    if (!modal) return [];
+                    const out = [];
+                    for (const inp of modal.querySelectorAll(
+                            'input[type=checkbox]')) {
+                        if (inp.checked || inp.disabled) continue;
+                        // the visible wrapper is an ancestor of the hidden input
+                        let node = inp, rect = null;
+                        for (let i = 0; i < 4 && node; i++,
+                             node = node.parentElement) {
+                            const r = node.getBoundingClientRect();
+                            if (r.width > 6 && r.height > 6) { rect = r; break; }
+                        }
+                        if (rect)
+                            out.push({x: rect.x, y: rect.y,
+                                      w: rect.width, h: rect.height});
+                    }
+                    return out;
+                }""") or []
+            for b in boxes[:4]:
+                self.page.mouse.click(b["x"] + b["w"] / 2,
+                                      b["y"] + b["h"] / 2)
+                self.page.wait_for_timeout(400)
+                done.append(b)
+        except Exception:  # noqa: BLE001
+            pass
+        return done
+
     def click_text_at_coords(self, text: str) -> dict:
         """Trusted mouse click at the CENTRE of the visible element whose
         own text is ``text``. Playwright's text locators can resolve to a

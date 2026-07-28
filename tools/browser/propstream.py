@@ -438,6 +438,20 @@ def run_skiptrace_list(driver, config: BrowserConfig, list_name: str, *,
                                        "credit", "$"))]
     log(f"[skiptrace] ORDER: {report['order_summary']}")
 
+    # PROVEN NECESSARY: the order dialog cites 'PropStream Terms and
+    # Conditions' and 'DNC Policy' and gates Place Order behind their
+    # agreement checkbox — without it the button is inert (a placed
+    # 'order' produced 0% contact fill on re-export).
+    report["ticked"] = getattr(driver, "tick_modal_checkboxes", list)()
+    log(f"[skiptrace] agreement checkboxes ticked: {len(report['ticked'])}")
+    wait(800)
+    # name the traced-results list when the dialog offers the field
+    if "Name Your List" in report["dialog"]:
+        getattr(driver, "fill_css", lambda c, v: False)(
+            '[class*="Modal"] input[type="text"], [role=dialog] input[type="text"]',
+            f"{list_name}-traced")
+        wait(500)
+
     # confirm: the dialog's own affirmative control (never Cancel/Close),
     # clicked by coordinates — the mechanism this app actually honours
     for label in (report["dialog_buttons"] or []) + [
