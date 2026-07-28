@@ -20,6 +20,24 @@ except ImportError:
 from .config import load_config
 
 
+def _build_stamp() -> str:
+    """Short commit of the checkout actually running — printed on every
+    command so a stale working copy is obvious immediately (a `git pull`
+    missed between fixes has silently wasted whole live runs)."""
+
+    import subprocess
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[2]
+    try:
+        out = subprocess.run(
+            ["git", "-C", str(root), "log", "-1", "--format=%h %cr"],
+            capture_output=True, text=True, timeout=5)
+        return (out.stdout or "").strip()
+    except Exception:  # noqa: BLE001
+        return ""
+
+
 def _apply_overrides(config, args):
     changes = {}
     for cli_attr, field in (
@@ -69,6 +87,10 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--headful", action="store_true")
     parser.add_argument("--config", default=None, help="YAML overlay (fields + selectors)")
     args = parser.parse_args(argv)
+
+    stamp = _build_stamp()
+    if stamp:
+        print(f"[cli] build {stamp}", file=sys.stderr)
 
     config = _apply_overrides(load_config(args.config), args)
 
