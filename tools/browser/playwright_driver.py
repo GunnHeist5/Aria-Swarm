@@ -342,6 +342,55 @@ class PlaywrightPageDriver:
         except Exception:  # noqa: BLE001
             return ""
 
+    def click_text_at_coords(self, text: str) -> dict:
+        """Trusted mouse click at the CENTRE of the visible element whose
+        own text is ``text``. Playwright's text locators can resolve to a
+        hidden duplicate (this app keeps other views mounted), and a JS
+        .click() is ignored by its React controls — a real pointer event at
+        real pixels is neither. Returns the clicked rect ({} if not found)."""
+
+        try:
+            box = self.page.evaluate(
+                """(text) => {
+                    let hit = null;
+                    for (const el of document.querySelectorAll('body *')) {
+                        const r = el.getBoundingClientRect();
+                        if (r.width < 4 || r.height < 4) continue;
+                        const t = (el.innerText || '')
+                            .replace(/\\s+/g, ' ').trim();
+                        if (t === text) hit = el;  // last visible = deepest
+                    }
+                    if (!hit) return null;
+                    const r = hit.getBoundingClientRect();
+                    return {x: r.x, y: r.y, w: r.width, h: r.height};
+                }""", text)
+            if not box:
+                return {}
+            self.page.mouse.click(box["x"] + box["w"] / 2,
+                                  box["y"] + box["h"] / 2)
+            return box
+        except Exception:  # noqa: BLE001
+            return {}
+
+    def download_click_at_coords(self, text: str, dest_dir: str,
+                                 timeout_ms: int = 30000) -> str:
+        """click_text_at_coords with the download listener armed."""
+
+        import os
+
+        dest_dir = os.path.expanduser(dest_dir)
+        os.makedirs(dest_dir, exist_ok=True)
+        try:
+            with self.page.expect_download(timeout=timeout_ms) as dl:
+                if not self.click_text_at_coords(text):
+                    return ""
+            download = dl.value
+            dest = os.path.join(dest_dir, download.suggested_filename)
+            download.save_as(dest)
+            return dest
+        except Exception:  # noqa: BLE001
+            return ""
+
     def adopt_new_page(self) -> str:
         """If the last click opened a NEW tab (PropStream does this for some
         actions), switch this driver onto it and return its URL. '' when no

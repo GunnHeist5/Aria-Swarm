@@ -389,10 +389,16 @@ def run_skiptrace_list(driver, config: BrowserConfig, list_name: str, *,
     report["selection"] = _select_all_best_effort(driver, wait, log,
                                                   "skiptrace")
 
+    getattr(driver, "screenshot", lambda *_: "")("skiptrace-after-select")
     before = set(texts())
     report["pages_before"] = getattr(driver, "page_urls", list)()
-    if not _click_text_robust(driver, "Skip Trace"):
+    # coordinate click: the text locators can resolve to a hidden duplicate
+    # (the Search view stays mounted with its own 'Skip Trace' item)
+    hit = getattr(driver, "click_text_at_coords", lambda t: {})("Skip Trace")
+    report["skiptrace_click"] = hit or _click_text_robust(driver, "Skip Trace")
+    if not report["skiptrace_click"]:
         raise VerificationError("could not click Skip Trace")
+    log(f"[skiptrace] clicked: {report['skiptrace_click']}")
     wait(3000)
     # the action may open a NEW TAB rather than a modal
     opened_url = getattr(driver, "adopt_new_page", lambda: "")()
@@ -486,9 +492,14 @@ def run_export_list(driver, config: BrowserConfig, list_name: str, *,
         raise VerificationError(
             "Export is still disabled after select-all — enabled controls: "
             f"{enabled}")
+    getattr(driver, "screenshot", lambda *_: "")("export-after-select")
     before = set(texts())
-    exported = getattr(driver, "try_download_click", lambda *a, **k: "")(
-        "Export", dest_dir, 25000)
+    # coordinate click first (text locators can hit a hidden duplicate)
+    exported = getattr(driver, "download_click_at_coords",
+                       lambda *a, **k: "")("Export", dest_dir, 30000)
+    if not exported:
+        exported = getattr(driver, "try_download_click", lambda *a, **k: "")(
+            "Export", dest_dir, 25000)
     if not exported:
         # what did the Export click actually put on screen? (DIFF, not a
         # slice — the sidebar dominates any raw dump)
