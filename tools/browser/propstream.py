@@ -301,9 +301,18 @@ def _open_saved_list(driver, config: BrowserConfig, list_name: str, *,
     report["screen"] = getattr(driver, "visible_own_texts",
                                lambda *_: [])()[:30]
     if list_name not in report["screen"]:
-        raise VerificationError(
-            f"saved list {list_name!r} is not in My Properties — lists on "
-            f"screen: {report['screen']}")
+        # a UTC date rollover must not orphan yesterday's list: fall back to
+        # the newest list sharing this prefix (aria-{county}-{state}-)
+        prefix = list_name.rsplit("-", 1)[0] + "-"
+        matches = sorted(t for t in report["screen"]
+                         if t.startswith(prefix))
+        if not matches:
+            raise VerificationError(
+                f"saved list {list_name!r} is not in My Properties — lists on "
+                f"screen: {report['screen']}")
+        list_name = matches[-1]
+        report["list_name"] = list_name
+        log(f"[list] exact name absent; using newest match {list_name!r}")
 
     how = _click_text_robust(driver, list_name)
     report["list_click"] = how
@@ -320,6 +329,37 @@ def _open_saved_list(driver, config: BrowserConfig, list_name: str, *,
             break
     report["list_screen"] = getattr(driver, "page_text", lambda *_: "")(1200)
     report["toolbar"] = getattr(driver, "visible_button_texts", list)(30)
+
+
+def _select_all_best_effort(driver, wait, log, tag: str) -> str:
+    """Click the grid's header checkbox and report whatever selection
+    marker the view shows. The list view's counter wording is unknown, so
+    this NEVER blocks the flow — toolbar actions may well apply to the
+    whole list — but a selection is required by some of them."""
+
+    import re
+
+    hit = getattr(driver, "click_first_checkbox", lambda: "")()
+    wait(2000)
+    txt = getattr(driver, "page_text", lambda *_: "")(4000)
+    m = re.search(r"([\d,]+)\s*(SELECTED|selected|Selected)", txt or "")
+    marker = m.group(0) if m else ""
+    log(f"[{tag}] select-all: checkbox={hit or 'none'} marker={marker or 'none'}")
+    return marker
+
+
+def _wait_for_new_ui(driver, wait, before: set, tries: int = 8) -> list:
+    """Poll for text that wasn't on screen before — modals can take
+    several seconds to mount after a toolbar click."""
+
+    texts = getattr(driver, "visible_own_texts", lambda *_: [])
+    new: list = []
+    for _ in range(tries):
+        wait(1500)
+        new = [t for t in texts() if t not in before]
+        if new:
+            break
+    return new
 
 
 def run_skiptrace_list(driver, config: BrowserConfig, list_name: str, *,
@@ -343,15 +383,25 @@ def run_skiptrace_list(driver, config: BrowserConfig, list_name: str, *,
             f"no Skip Trace control on the list view — toolbar: "
             f"{report['toolbar']}")
 
+    # some toolbar actions operate on selected rows — select first (never
+    # fatal: the action may well apply to the whole list)
+    report["selection"] = _select_all_best_effort(driver, wait, log,
+                                                  "skiptrace")
+
     before = set(texts())
     if not _click_text_robust(driver, "Skip Trace"):
         raise VerificationError("could not click Skip Trace")
-    wait(3000)
     _detect_challenge(driver)
-    report["dialog"] = [t for t in texts() if t not in before][:25]
+    report["dialog"] = _wait_for_new_ui(driver, wait, before)[:25]
     report["dialog_buttons"] = [
         t for t in getattr(driver, "visible_button_texts", list)(30)
         if t not in report["toolbar"]]
+    if not report["dialog"] and not report["dialog_buttons"]:
+        getattr(driver, "screenshot", lambda *_: "")("skiptrace-no-dialog")
+        raise VerificationError(
+            "Skip Trace clicked but nothing appeared (no dialog, no new "
+            f"buttons) — selection marker: {report['selection'] or 'none'}; "
+            "the action may need rows selected or a different control")
     getattr(driver, "screenshot", lambda *_: "")("skiptrace-dialog")
     log(f"[skiptrace] dialog: {report['dialog'][:15]}")
     log(f"[skiptrace] dialog buttons: {report['dialog_buttons']}")
@@ -413,14 +463,14 @@ def run_export_list(driver, config: BrowserConfig, list_name: str, *,
 
     dest_dir = str(Path(config.download_dir).expanduser())
     texts = getattr(driver, "visible_own_texts", lambda *_: [])
+    report["selection"] = _select_all_best_effort(driver, wait, log, "export")
     before = set(texts())
     exported = getattr(driver, "try_download_click", lambda *a, **k: "")(
         "Export", dest_dir, 25000)
     if not exported:
         # what did the Export click actually put on screen? (DIFF, not a
         # slice — the sidebar dominates any raw dump)
-        wait(2000)
-        new = [t for t in texts() if t not in before]
+        new = _wait_for_new_ui(driver, wait, before)
         report["export_dialog"] = new[:25]
         report["export_dialog_buttons"] = [
             t for t in getattr(driver, "visible_button_texts", list)(30)
