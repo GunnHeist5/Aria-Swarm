@@ -49,12 +49,17 @@ def email_fill_rate(path: str | Path) -> tuple[int, float]:
 
 def run_county(county: str, state: str, *, config, username: str, password: str,
                recipe_steps=(), skiptrace: bool = True,
+               list_name: str | None = None,
                min_email_fill: float = MIN_EMAIL_FILL,
                poll_attempts: int = TRACE_POLL_ATTEMPTS,
                poll_seconds: int = TRACE_POLL_SECONDS,
                driver_factory=None, flow=None, ingest=None, sleep=None,
                log=print) -> dict:
     """Pull a county, trace it, export it, load it into the ledger.
+
+    ``list_name`` skips the pull and works an EXISTING PropStream list —
+    the way to enrich lists built before this pipeline existed (trace them,
+    wait for the contacts, export, backfill the ledger).
 
     Returns a report; raises only when a stage fails in a way that makes
     the next stage meaningless (the browser flows fail closed themselves).
@@ -81,22 +86,27 @@ def run_county(county: str, state: str, *, config, username: str, password: str,
         report["stages"].append({"stage": name, **extra})
         log(f"[pipeline] {name}" + (f" {extra}" if extra else ""))
 
-    # ---- 1. pull + save the list -----------------------------------------
-    # The pull NEVER skip traces: the grid's own trace path is uncalibrated,
-    # and tracing belongs to run_skiptrace_list against the saved list.
-    pull_config = config.mutate(run_skiptrace=False) \
-        if hasattr(config, "mutate") else config
-    with driver_factory(pull_config) as driver:
-        pull = flow.run_pull_v2(driver, pull_config, county, state,
-                                username=username, password=password,
-                                recipe_steps=recipe_steps,
-                                lot_min_sqft=None if recipe_steps else 5000,
-                                dry=False, log=log)
-    report["list_name"] = list_name = pull.get("list_name")
-    report["count"] = pull.get("count")
-    stage("pulled", count=pull.get("count"), list_name=list_name)
-    if not list_name:
-        raise RuntimeError("pull did not report a saved list name")
+    # ---- 1. pull + save the list (or adopt an existing one) ---------------
+    if list_name:
+        report["list_name"] = list_name
+        stage("existing_list", list_name=list_name)
+    else:
+        # The pull NEVER skip traces: the grid's own trace path is
+        # uncalibrated, and tracing belongs to run_skiptrace_list against
+        # the saved list.
+        pull_config = config.mutate(run_skiptrace=False) \
+            if hasattr(config, "mutate") else config
+        with driver_factory(pull_config) as driver:
+            pull = flow.run_pull_v2(driver, pull_config, county, state,
+                                    username=username, password=password,
+                                    recipe_steps=recipe_steps,
+                                    lot_min_sqft=None if recipe_steps else 5000,
+                                    dry=False, log=log)
+        report["list_name"] = list_name = pull.get("list_name")
+        report["count"] = pull.get("count")
+        stage("pulled", count=pull.get("count"), list_name=list_name)
+        if not list_name:
+            raise RuntimeError("pull did not report a saved list name")
 
     # ---- 2. skip trace (never re-ordered on a later pass) -----------------
     if skiptrace:

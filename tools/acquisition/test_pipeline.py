@@ -143,3 +143,24 @@ def test_email_fill_rate_counts_either_email_column(tmp_path):
     rows, fill = pipeline.email_fill_rate(path)
     assert rows == 4 and abs(fill - 0.25) < 1e-9
     assert json.dumps({"ok": True})      # sanity: module imports cleanly
+
+
+def test_pipeline_can_work_an_existing_list_without_pulling(tmp_path):
+    """--list-name enriches a list built before the pipeline existed:
+    trace it, wait for the contacts, export, backfill the ledger."""
+
+    _env_db(tmp_path)
+
+    class _NoPull(_Flow):
+        def run_pull_v2(self, *a, **kw):        # must never be called
+            raise AssertionError("an existing list must not trigger a pull")
+
+    flow = _NoPull(tmp_path, fill_after=2)
+    report = pipeline.run_county(
+        "montgomery", "tx", config=object(), username="u", password="p",
+        list_name="Vacant Land Montgomer TX", driver_factory=_driver_factory,
+        flow=flow, sleep=lambda _: None, log=lambda *_: None)
+
+    assert report["list_name"] == "Vacant Land Montgomer TX"
+    assert flow.orders == 1 and flow.exports == 2
+    assert report["ingested"]["inserted"] == 10

@@ -277,7 +277,8 @@ def _cmd_pipeline(args, config) -> int:
             reports.append(pipeline_mod.run_county(
                 county, args.state, config=bconfig, username=username,
                 password=password, recipe_steps=steps,
-                skiptrace=not args.no_skiptrace, **kwargs))
+                skiptrace=not args.no_skiptrace,
+                list_name=args.list_name, **kwargs))
         except Exception as exc:  # noqa: BLE001 — one county must not sink the rest
             print(f"[pipeline] {county}/{args.state} FAILED: {exc}")
             reports.append({"county": county, "state": args.state,
@@ -604,6 +605,10 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--county", required=True,
                    help="one county, or a comma-separated list")
     p.add_argument("--state", default="tx")
+    p.add_argument("--list-name", default=None,
+                   help="work an EXISTING PropStream list instead of pulling "
+                        "(trace it, wait for contacts, export, backfill) — "
+                        "how to enrich lists built before the pipeline")
     p.add_argument("--lot-min-acres", type=float, default=0.25)
     p.add_argument("--lot-max-acres", type=float, default=2.0)
     p.add_argument("--assessed-min", type=float, default=30000)
