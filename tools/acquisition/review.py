@@ -44,6 +44,16 @@ def pending(conn: sqlite3.Connection | None = None,
             conn.close()
 
 
+def _looks_like_uuid(value: str) -> bool:
+    """Instantly email ids are UUIDs; our synthetic bump ids are not
+    ('bump-harris_tx-0-HARBOR-DR-7d'). Replying to a synthetic id is what
+    earns a 404 'Email not found'."""
+
+    parts = (value or "").split("-")
+    return len(parts) == 5 and all(
+        c in "0123456789abcdefABCDEF" for c in "".join(parts))
+
+
 def _get(item_id: str, conn: sqlite3.Connection) -> sqlite3.Row:
     row = conn.execute(
         "SELECT * FROM review_queue WHERE id=?", (item_id,)).fetchone()
@@ -96,13 +106,36 @@ def approve(item_id: str, *, send: bool, api_key: str = "",
                 "item has no eaccount and no fallback mailbox is known — set "
                 "INSTANTLY_EACCOUNT in .env, or send from the Instantly UI")
 
+        # Threading target. A synthetic item (an offer bump) carries the
+        # seller's real email id in reply_to; when that is missing — the
+        # hand-entered leads — its OWN id is synthetic, and Instantly
+        # answers 404 'Email not found'. Recover by finding the seller's
+        # most recent genuine reply (a queue id that is a real UUID).
+        # a reply item IS the seller's email (its own id threads); only a
+        # SYNTHETIC item (an offer bump we generated) needs one supplied
+        synthetic = item["draft_kind"] == "bump" or str(
+            item["id"]).startswith("bump-")
+        reply_to = item["reply_to"] or ""
+        if synthetic and not _looks_like_uuid(reply_to):
+            row = conn.execute(
+                "SELECT id FROM review_queue WHERE lead_email=? "
+                "AND id LIKE '%-%-%-%-%' ORDER BY ts DESC LIMIT 1",
+                (item["lead_email"],)).fetchone()
+            if row and _looks_like_uuid(row["id"]):
+                reply_to = row["id"]
+                log(f"[review] threading under the seller's last real email "
+                    f"({reply_to})")
+            elif not reply_to:
+                raise ledger.LedgerError(
+                    f"no real email to thread under for {item['lead_email']} "
+                    "— this lead was entered by hand and has no reply stored "
+                    "from Instantly; send this bump from the Instantly UI")
+
         subject = item["subject"] or ""
         if subject and not subject.lower().startswith("re:"):
             subject = f"Re: {subject}"
         payload = {
-            # synthetic items (offer bumps) thread under the seller's last
-            # real email via reply_to; reply items ARE that email (their id)
-            "reply_to_uuid": item["reply_to"] or item["id"],
+            "reply_to_uuid": reply_to or item["id"],
             "eaccount": eaccount,
             "subject": subject,
             "body": {"text": body_text},
