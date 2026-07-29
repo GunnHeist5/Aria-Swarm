@@ -24,7 +24,19 @@ from .config import AcquisitionConfig, DEFAULT_CONFIG
 from .reply.verify import offer_box
 
 # ledger market key -> screener adapter name (tools/screener COUNTY_ADAPTERS)
-ADAPTER_BY_MARKET = {"harris_tx": "harris", "putnam_fl": "putnam"}
+# Counties with a screener adapter. harris/putnam are hand-written; the
+# Texas coastal set is config-driven (tools/screener/txcounty.py) — added
+# because Galveston and Brazoria leads were going out with NO flood screen,
+# and Gulf-coast land in an A/V zone is exactly what you must not
+# under-price.
+ADAPTER_BY_MARKET = {
+    "harris_tx": "harris",
+    "putnam_fl": "putnam",
+    "galveston_tx": "galveston",
+    "brazoria_tx": "brazoria",
+    "chambers_tx": "chambers",
+    "liberty_tx": "liberty",
+}
 
 
 def _export_shape(row: sqlite3.Row) -> dict:

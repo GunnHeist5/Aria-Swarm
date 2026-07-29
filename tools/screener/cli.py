@@ -27,14 +27,21 @@ try:
 except ImportError:
     pass
 
-from . import fema, frontage, harris, putnam
+from . import fema, frontage, harris, putnam, txcounty
 from .cache import Cache
 from .comps import BraveAuthError, BraveClient, run_comps
-from .config import ScreenerConfig, config_hash, load_config
+from .config import DEFAULT_CONFIG, ScreenerConfig, config_hash, load_config
 from .geometry import lot_mismatch, parcel_metrics, shape_flag
 from .scoring import score_row
 
+# harris/putnam have hand-written adapters; every other Texas county is
+# driven by its tx_county_gis entry through the generic adapter (endpoints
+# are data — see tools/screener/txcounty.py).
 COUNTY_ADAPTERS = {"harris": harris, "putnam": putnam}
+COUNTY_ADAPTERS.update({
+    name: txcounty.adapter_for(name)
+    for name in sorted(DEFAULT_CONFIG.tx_county_gis)
+})
 
 ENRICH_STAGES = ("geometry", "frontage", "flood", "comps")
 

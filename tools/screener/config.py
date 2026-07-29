@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-from dataclasses import asdict, dataclass, replace
+from dataclasses import asdict, dataclass, field, replace
 
 
 @dataclass(frozen=True)
@@ -55,6 +55,45 @@ class ScreenerConfig:
     )
     hcad_account_field: str = "HCAD_NUM"       # 13-digit account column on the layer
     hcad_owner_fields: tuple = ("owner_name_1", "owner_name_2", "owner_name_3")
+
+    # -- other Texas counties: DATA, driving tools/screener/txcounty.py --
+    # Texas publishes no statewide cadastral, so each county's appraisal
+    # district hosts its own parcel layer. Adding a county is an entry here,
+    # not a module. The coastal ones matter most: Galveston and Brazoria
+    # leads were being emailed with NO flood screen at all.
+    #
+    # UNVERIFIED from the dev sandbox (county GIS hosts are unreachable from
+    # it). Confirm each with `python screen.py --check --county <name>` on
+    # the VPS and correct the url/key_field here (or in config.yaml) if a
+    # host has moved. A wrong entry fails closed: fetch_parcel returns
+    # missing/error and the lead routes to needs_manual — never a bad kill.
+    tx_county_gis: dict = field(default_factory=lambda: {
+        "galveston": {
+            "url": "https://gis.galvestoncountytx.gov/server/rest/services/"
+                   "Public/Parcels/MapServer/0",
+            "key_field": "PROP_ID",
+            "owner_fields": ("OWNER_NAME", "owner_name", "NAME"),
+            "extra_fields": ("Acreage",),
+        },
+        "brazoria": {
+            "url": "https://gis.brazoriacountytx.gov/arcgis/rest/services/"
+                   "Parcels/MapServer/0",
+            "key_field": "PROP_ID",
+            "owner_fields": ("OWNER_NAME", "owner_name"),
+        },
+        "chambers": {
+            "url": "https://gis.chamberscad.org/arcgis/rest/services/"
+                   "Parcels/MapServer/0",
+            "key_field": "PROP_ID",
+            "owner_fields": ("OWNER_NAME", "owner_name"),
+        },
+        "liberty": {
+            "url": "https://gis.libertycad.com/arcgis/rest/services/"
+                   "Parcels/MapServer/0",
+            "key_field": "PROP_ID",
+            "owner_fields": ("OWNER_NAME", "owner_name"),
+        },
+    })
     fema_nfhl_url: str = (
         "https://hazards.fema.gov/arcgis/rest/services/public/NFHL/MapServer/28"
     )

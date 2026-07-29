@@ -46,10 +46,63 @@ COUNTY_PROBES = {
 }
 
 
+def probe_layer(url: str, key_field: str,
+                config: ScreenerConfig = DEFAULT_CONFIG) -> dict:
+    """Does this parcel layer exist and carry the configured key field?
+
+    For counties wired purely from config (tx_county_gis) there is no
+    hand-picked parcel fixture, so validate the ENDPOINT itself: fetch the
+    layer metadata and confirm the key field is really one of its columns.
+    A wrong entry then shows up here instead of silently returning
+    'missing' for every lead.
+    """
+
+    from .arcgis import _request
+
+    status, body = _request(f"{url}?f=json", timeout_s=config.request_timeout_s)
+    if status != 200:
+        return {"ok": False, "detail": f"HTTP {status}"}
+    try:
+        meta = json.loads(body)
+    except ValueError:
+        return {"ok": False, "detail": "layer returned non-JSON"}
+    if meta.get("error"):
+        return {"ok": False, "detail": str(meta["error"])[:120]}
+    fields = [f.get("name") for f in (meta.get("fields") or [])]
+    if key_field not in fields:
+        return {"ok": False, "name": meta.get("name"),
+                "detail": f"key_field {key_field!r} not on the layer",
+                "fields": fields[:25]}
+    return {"ok": True, "name": meta.get("name"), "key_field": key_field,
+            "geometry": meta.get("geometryType")}
+
+
 def run_check(config: ScreenerConfig = DEFAULT_CONFIG) -> int:
     from .cli import COUNTY_ADAPTERS
 
     county = COUNTY_ADAPTERS[config.county]
+    if config.county not in COUNTY_PROBES:
+        # config-driven county: prove the endpoint, then the nationwide
+        # flood layer it will be screened against
+        spec = (config.tx_county_gis or {}).get(config.county) or {}
+        report = {"county": config.county, "probes": {}}
+        layer = probe_layer(spec.get("url", ""), spec.get("key_field", ""),
+                            config)
+        report["probes"]["parcel_layer"] = layer
+        flood = fema.flood_zone(29.3, -94.8, config)      # Galveston Bay area
+        report["probes"]["fema"] = {
+            "ok": "error" not in flood,
+            "zone": flood.get("flood_zone"),
+            "flag": flood.get("flood_flag"),
+            "detail": flood.get("error"),
+        }
+        ok = layer.get("ok") and report["probes"]["fema"]["ok"]
+        print(json.dumps(report, indent=2))
+        print(f"\nRESULT: {'OK' if ok else 'NEEDS ATTENTION'} — "
+              f"{config.county} is config-driven; fix its tx_county_gis entry "
+              "if the parcel layer probe failed")
+        return 0 if ok else 1
+
     spec = COUNTY_PROBES[config.county]
     account, center = spec["account"], spec["center"]
     report: dict = {"county": config.county, "probes": {}}
