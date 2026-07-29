@@ -14,6 +14,7 @@ the compliance footer stays.
 from __future__ import annotations
 
 import json
+import os
 import sqlite3
 import time
 
@@ -73,10 +74,27 @@ def approve(item_id: str, *, send: bool, api_key: str = "",
         body_text = strip_approval_footer(edited_text or item["draft"] or "")
         if not body_text.strip():
             raise ledger.LedgerError("empty draft — nothing to approve")
-        if not item["eaccount"]:
+        eaccount = item["eaccount"]
+        if not eaccount:
+            # A lead entered by hand (a seller who replied from an address no
+            # export carried) has no mailbox recorded, which blocked its offer
+            # bumps entirely. Fall back to the mailbox this account actually
+            # sends from: any other queue item's eaccount, else the configured
+            # default. Threading still needs reply_to, so a bump with neither
+            # is the only genuinely unsendable case.
+            row = conn.execute(
+                "SELECT eaccount FROM review_queue WHERE eaccount != '' "
+                "AND eaccount IS NOT NULL ORDER BY created_at DESC "
+                "LIMIT 1").fetchone()
+            eaccount = (row["eaccount"] if row else "") or os.environ.get(
+                "INSTANTLY_EACCOUNT", "")
+            if eaccount:
+                log(f"[review] no mailbox on this item — sending from "
+                    f"{eaccount} (most recent known sender)")
+        if not eaccount:
             raise ledger.LedgerError(
-                "item has no eaccount (receiving mailbox unknown) — cannot "
-                "thread a reply; send manually from the Instantly UI instead")
+                "item has no eaccount and no fallback mailbox is known — set "
+                "INSTANTLY_EACCOUNT in .env, or send from the Instantly UI")
 
         subject = item["subject"] or ""
         if subject and not subject.lower().startswith("re:"):
@@ -85,7 +103,7 @@ def approve(item_id: str, *, send: bool, api_key: str = "",
             # synthetic items (offer bumps) thread under the seller's last
             # real email via reply_to; reply items ARE that email (their id)
             "reply_to_uuid": item["reply_to"] or item["id"],
-            "eaccount": item["eaccount"],
+            "eaccount": eaccount,
             "subject": subject,
             "body": {"text": body_text},
         }

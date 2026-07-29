@@ -328,3 +328,44 @@ def test_backfill_never_overwrites_existing_contacts(tmp_path):
     lead = ledger.find_leads(email="first@x.com")
     assert lead and lead[0]["email"] == "first@x.com"
     assert not ledger.find_leads(email="second@x.com")
+
+
+def test_approve_falls_back_to_a_known_mailbox(tmp_path):
+    """A hand-entered lead has no eaccount, which blocked its offer bumps
+    outright. Fall back to the mailbox this account demonstrably sends
+    from (the most recent queue item that has one)."""
+
+    _env_db(tmp_path)
+    from . import review as review_mod
+
+    ledger.ingest_rows([_row()], source_list="x")
+    conn = ledger.connect()
+    ledger.init_db(conn)
+    # a real reply carrying the mailbox...
+    conn.execute(
+        "INSERT INTO review_queue (id, county_key, apn, lead_email, eaccount, "
+        "subject, reply_text, classification, draft, draft_kind, state, ts, "
+        "created_at, updated_at) VALUES "
+        "('real','harris_tx','0440240000280','s@x.com','me@aria.com','Lot',"
+        "'hi','question','d','reply','sent','1','1','1')")
+    # ...and a bump with none (the hand-entered lead)
+    conn.execute(
+        "INSERT INTO review_queue (id, county_key, apn, lead_email, eaccount, "
+        "subject, reply_text, classification, draft, draft_kind, state, ts, "
+        "reply_to, created_at, updated_at) VALUES "
+        "('bump-x','harris_tx','0440240000280','s@x.com','','Lot','','bump',"
+        "'circling back','bump','pending_review','2','real','2','2')")
+    conn.commit()
+
+    sent = {}
+
+    def fake_http(method, url, payload, key):
+        sent.update(payload)
+        return 200, "{}"
+
+    out = review_mod.approve("bump-x", send=True, http_request=fake_http,
+                             conn=conn, log=lambda *_: None)
+    conn.close()
+    assert out["sent"] is True
+    assert sent["eaccount"] == "me@aria.com", "must reuse a known mailbox"
+    assert sent["reply_to_uuid"] == "real", "and still thread under the reply"
