@@ -137,6 +137,30 @@ class PlaywrightPageDriver:
             self.page.keyboard.press("Delete")
             self.page.keyboard.type(str(value), delay=30)
 
+    def input_values(self, limit: int = 20) -> list:
+        """Visible inputs with their CURRENT values — the only way to prove
+        which geography a search actually committed to (the placeholder
+        vanishes once an input has a value, so it cannot be the anchor)."""
+
+        try:
+            return self.page.evaluate(
+                """(limit) => {
+                    const out = [];
+                    for (const el of document.querySelectorAll('input')) {
+                        const r = el.getBoundingClientRect();
+                        if (r.width === 0 || r.height === 0) continue;
+                        const v = (el.value || '').trim();
+                        if (!v) continue;
+                        out.push({value: v.slice(0, 60),
+                                  placeholder: (el.placeholder || '').slice(0, 40),
+                                  cls: String(el.className || '').slice(0, 40)});
+                        if (out.length >= limit) break;
+                    }
+                    return out;
+                }""", limit)
+        except Exception:  # noqa: BLE001
+            return []
+
     def read_labeled_range(self, label: str) -> list:
         """Current VALUES of the two inputs following a filter label.
 

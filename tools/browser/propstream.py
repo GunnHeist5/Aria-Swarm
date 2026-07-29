@@ -639,6 +639,27 @@ def run_pull_v2(driver, config: BrowserConfig, county: str, state: str, *,
             f"county search never applied for {county}/{state} — counters "
             "stayed empty; refusing to continue")
 
+    # WHICH geography? Live counters only prove a search ran, not where.
+    # Brazoria returned 8,487 / 28,995 / 2,456 / 1,067 across runs with the
+    # same recipe — the autocomplete can land on the CITY of Brazoria (or a
+    # zip) instead of the county. Read the committed value back and demand
+    # it names this county.
+    values = getattr(driver, "input_values", lambda *_: [])(20)
+    report["geography_inputs"] = values
+    needle, county_needle = county.lower(), f"{county.lower()} county"
+    committed = next(
+        (v["value"] for v in values if county_needle in v["value"].lower()), "")
+    if not committed:
+        loose = [v["value"] for v in values if needle in v["value"].lower()]
+        getattr(driver, "screenshot", lambda *_: "")("pull-v2-geography-miss")
+        raise VerificationError(
+            f"geography is not '{county.title()} County' — committed inputs: "
+            f"{[v['value'] for v in values]}"
+            + (f" (found {loose}, which is NOT the county)" if loose else "")
+            + "; refusing to pull the wrong area")
+    report["geography"] = committed
+    log(f"[pull-v2] geography verified: {committed!r}")
+
     # filters: clean slate, then the recipe. A modal can appear AFTER the
     # search executes (observed live) — dismiss, and fall back to a JS
     # click (interception-immune) if the locator click is still blocked.
