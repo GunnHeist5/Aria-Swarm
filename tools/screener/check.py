@@ -59,7 +59,9 @@ def probe_layer(url: str, key_field: str,
 
     from .arcgis import _request
 
-    status, body = _request(f"{url}?f=json", timeout_s=config.request_timeout_s)
+    if not url or not key_field:
+        return {"ok": False, "detail": "county has no url/key_field configured"}
+    status, body = _request("GET", f"{url}?f=json", None, "")
     if status != 200:
         return {"ok": False, "detail": f"HTTP {status}"}
     try:
