@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+{% block title %}Admin — Aria Pharma{% endblock %}
+{% block nav %}<a href="/admin">Admin</a><a href="/trainer">Trainer console</a>{% endblock %}
+{% block content %}
+<h1>Admin</h1>
+
+{% if new_tenant %}<p class="notice">Tenant created: <code>{{ new_tenant }}</code></p>{% endif %}
+{% if new_key %}
+<p class="notice">New key (shown once — store it now):<br><code>{{ new_key }}</code></p>
+{% endif %}
+
+<section class="card">
+  <h2>Tenants</h2>
+  <table>
+    <tr><th>ID</th><th>Name</th><th>Tier</th><th>Status</th><th>Usage</th></tr>
+    {% for t in tenants %}
+    <tr><td><code>{{ t.tenant_id }}</code></td><td>{{ t.name }}</td><td>{{ t.tier }}</td>
+        <td>{{ t.status }}</td><td>{{ t.used }}/{{ t.limit }}</td></tr>
+    {% endfor %}
+  </table>
+  <form method="post" action="/admin/tenants" class="row">
+    <input name="name" placeholder="Company name" required>
+    <select name="tier">{% for tier in tiers %}<option>{{ tier }}</option>{% endfor %}</select>
+    <button type="submit">Create tenant</button>
+  </form>
+</section>
+
+<section class="card">
+  <h2>Issue key</h2>
+  <form method="post" action="/admin/keys" class="row">
+    <select name="role">
+      <option value="client">client</option>
+      <option value="trainer">trainer</option>
+      <option value="admin">admin</option>
+    </select>
+    <select name="tenant_id">
+      <option value="">— no tenant (staff keys) —</option>
+      {% for t in tenants %}<option value="{{ t.tenant_id }}">{{ t.name }}</option>{% endfor %}
+    </select>
+    <input name="label" placeholder="Label (optional)">
+    <button type="submit">Issue</button>
+  </form>
+</section>
+{% endblock %}

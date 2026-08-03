@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+{% block title %}Analyst — Aria Pharma{% endblock %}
+{% block content %}
+<div class="two-col">
+  <aside>
+    <a href="/chat" class="button small">New analysis</a>
+    <ul class="conv-list">
+      {% for c in conversations %}
+      <li><a href="/chat?conversation={{ c.conversation_id }}"
+             class="{{ 'active' if c.conversation_id == conversation_id }}">{{ c.title or c.conversation_id }}</a></li>
+      {% endfor %}
+    </ul>
+    <p class="muted small">{{ used }} analyses used this month</p>
+  </aside>
+  <section>
+    {% if error %}<p class="error">{{ error }}</p>{% endif %}
+    <div class="messages">
+      {% for m in messages %}
+      <div class="msg {{ m.role }}"><span class="role">{{ m.role }}</span>
+        <div class="body">{{ m.content }}</div></div>
+      {% else %}
+      <p class="muted">Ask a question about your data — e.g. “Which region's TRx declined fastest last quarter, and why might that be?”</p>
+      {% endfor %}
+    </div>
+    <form method="post" action="/chat" class="ask">
+      {% if conversation_id %}<input type="hidden" name="conversation" value="{{ conversation_id }}">{% endif %}
+      <textarea name="question" rows="3" placeholder="Ask your analyst…" required {% if over_limit %}disabled{% endif %}></textarea>
+      <button type="submit" {% if over_limit %}disabled{% endif %}>Analyze</button>
+      {% if over_limit %}<p class="error">Monthly analysis limit reached.</p>{% endif %}
+    </form>
+  </section>
+</div>
+{% endblock %}

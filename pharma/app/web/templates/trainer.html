@@ -1,0 +1,92 @@
+{% extends "base.html" %}
+{% block title %}Trainer console — Aria Pharma{% endblock %}
+{% block nav %}<a href="/trainer">Trainer console</a>{% endblock %}
+{% block content %}
+<h1>Trainer console</h1>
+
+<section class="card">
+  <h2>Ingest a document</h2>
+  <p class="muted small">PDF/markdown/text extract automatically; decks (.pptx) are stored for manual extraction. Everything lands as a draft — nothing is retrievable until you approve it.</p>
+  <form method="post" action="/trainer/ingest" enctype="multipart/form-data" class="upload">
+    <input type="file" name="file" required>
+    <select name="domain">
+      <option value="general">general</option>
+      <option value="brand_analytics">brand_analytics</option>
+      <option value="market_access">market_access</option>
+      <option value="comp_intel">comp_intel</option>
+    </select>
+    <button type="submit">Ingest</button>
+  </form>
+</section>
+
+<section class="card">
+  <h2>Methods library</h2>
+  {% for m in methods %}
+  <details class="method {{ m.status }}">
+    <summary><strong>{{ m.title }}</strong> — {{ m.kind }} / {{ m.domain or 'general' }} —
+      <span class="badge {{ m.status }}">{{ m.status }}</span>
+      {% if m.status == 'approved' %}(anonymized ✓){% endif %}
+    </summary>
+    {% if m.flags %}
+    <div class="flags"><strong>Scan flags:</strong>
+      <ul>{% for f in m.flags %}<li>{{ f }}</li>{% endfor %}</ul>
+    </div>
+    {% endif %}
+    {% if m.status in ('draft', 'pending_review') %}
+    <form method="post" action="/trainer/methods/{{ m.method_id }}/edit">
+      <input name="title" value="{{ m.title }}">
+      <textarea name="body_md" rows="12">{{ m.body_md }}</textarea>
+      <button type="submit">Save edits</button>
+    </form>
+    <div class="row">
+      <form method="post" action="/trainer/methods/{{ m.method_id }}/scan" class="inline">
+        <button type="submit">Run anonymization scan</button>
+      </form>
+      <form method="post" action="/trainer/methods/{{ m.method_id }}/approve" class="inline">
+        <label><input type="checkbox" name="anonymized" value="yes"> I confirm this text is fully anonymized</label>
+        <button type="submit" class="primary">Approve &amp; publish</button>
+      </form>
+      <form method="post" action="/trainer/methods/{{ m.method_id }}/reject" class="inline">
+        <button type="submit" class="danger">Reject</button>
+      </form>
+    </div>
+    {% else %}
+    <pre class="body-view">{{ m.body_md }}</pre>
+    {% endif %}
+  </details>
+  {% else %}
+  <p class="muted">No methods yet — ingest a document above.</p>
+  {% endfor %}
+</section>
+
+<section class="card">
+  <h2>File a correction (stays with that client)</h2>
+  <form method="post" action="/trainer/corrections">
+    <select name="tenant_id" required>
+      {% for t in tenants %}<option value="{{ t.tenant_id }}">{{ t.name }}</option>{% endfor %}
+    </select>
+    <input name="analysis_id" placeholder="analysis id (a_…)" required>
+    <textarea name="correction" rows="3" placeholder="What should the analyst do differently for this client?" required></textarea>
+    <button type="submit">File correction</button>
+  </form>
+</section>
+
+<section class="card">
+  <h2>Promote a generalized method to the global library</h2>
+  <p class="muted small">Write the client-free, generalized version yourself. It enters as a draft and still passes the scan + approval gate.</p>
+  <form method="post" action="/trainer/promote">
+    <select name="tenant_id" required>
+      {% for t in tenants %}<option value="{{ t.tenant_id }}">{{ t.name }} (origin, not stored)</option>{% endfor %}
+    </select>
+    <input name="title" placeholder="Generalized title" required>
+    <select name="domain">
+      <option value="general">general</option>
+      <option value="brand_analytics">brand_analytics</option>
+      <option value="market_access">market_access</option>
+      <option value="comp_intel">comp_intel</option>
+    </select>
+    <textarea name="body_md" rows="8" placeholder="Generalized playbook (no client names, brands, or figures)" required></textarea>
+    <button type="submit">Create draft</button>
+  </form>
+</section>
+{% endblock %}

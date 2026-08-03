@@ -1,0 +1,28 @@
+{% extends "base.html" %}
+{% block title %}Deliverables — Aria Pharma{% endblock %}
+{% block content %}
+<h1>Deliverables</h1>
+<table>
+  <tr><th>Title</th><th>Kind</th><th>Created</th><th></th></tr>
+  {% for d in deliverables %}
+  <tr>
+    <td>{{ d.title }}</td>
+    <td>{{ d.kind }}</td>
+    <td class="small">{{ d.created_at[:16].replace('T', ' ') }}</td>
+    <td><a href="/deliverables/{{ d.deliverable_id }}/download" class="button small">Download</a></td>
+  </tr>
+  {% else %}
+  <tr><td colspan="4" class="muted">Charts and reports from your analyses will appear here.</td></tr>
+  {% endfor %}
+</table>
+
+<h2>Analysis history</h2>
+<table>
+  <tr><th>Question</th><th>Status</th><th>When</th></tr>
+  {% for a in analyses %}
+  <tr><td>{{ a.question }}</td><td>{{ a.status }}</td><td class="small">{{ a.created_at[:16].replace('T', ' ') }}</td></tr>
+  {% else %}
+  <tr><td colspan="3" class="muted">No analyses yet.</td></tr>
+  {% endfor %}
+</table>
+{% endblock %}

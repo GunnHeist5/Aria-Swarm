@@ -1,0 +1,33 @@
+[project]
+name = "aria-pharma"
+version = "0.1.0"
+description = "AI pharma-consulting platform — analyst-on-demand with a human-curated methods library and hard tenant isolation."
+requires-python = ">=3.11"
+
+# Exact pins, house style: this stack holds regulated-adjacent client data, so
+# the substrate stays deterministic. Bump deliberately, never float.
+dependencies = [
+    "fastapi==0.141.1",
+    "uvicorn==0.52.1",
+    "jinja2==3.1.6",
+    "python-multipart==0.0.32",   # multipart form uploads (CSV/deck ingest)
+    "itsdangerous==2.2.0",        # signed session cookies
+    "anthropic==0.120.2",
+    "pandas==3.0.5",
+    "matplotlib==3.11.1",
+    "pypdf==6.14.2",
+    "python-dotenv==1.2.2",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest==9.1.1",
+    "httpx==0.28.1",              # FastAPI TestClient transport
+]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = { find = { include = ["app*"] } }
