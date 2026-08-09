@@ -1,0 +1,8 @@
+{
+  "_comment": "Purchase plan for `orchestrator numbers purchase` (AREA_CODE_TARGETS_PATH). One entry per target area code; count = how many local numbers to provision there. Copy to area_code_targets.json and edit to match where the campaign's prospects actually are.",
+  "plan": [
+    { "area_code": "614", "count": 2 },
+    { "area_code": "216", "count": 2 },
+    { "area_code": "813", "count": 2 }
+  ]
+}

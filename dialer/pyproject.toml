@@ -1,0 +1,56 @@
+[project]
+name = "reachwell-orchestrator"
+version = "0.1.0"
+description = "Reachwell AI outbound dialer — JustCall is the contact database, Twilio (behind a swappable VoiceProvider interface) does the AI calling."
+requires-python = ">=3.11"
+
+# The dialer is a standalone service inside the Aria-Swarm monorepo: it has its
+# own dependency tree and deploys as a single container (see Dockerfile).
+dependencies = [
+    # Webhook server + ConversationRelay websocket endpoint. python-multipart
+    # is required for Twilio's form-encoded status callbacks.
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.30",
+    "python-multipart>=0.0.9",
+
+    # HTTP to JustCall (the Twilio SDK carries its own transport).
+    "httpx>=0.27",
+
+    # Postgres — the durable source of truth for contacts, attempts, numbers.
+    "psycopg[binary,pool]>=3.2",
+
+    # Redis-backed job queue: dial jobs, scheduler/reconciler crons, dedupe.
+    "arq>=0.26",
+    "redis>=5.0",
+
+    # Voice provider #1. Never import the SDK outside orchestrator/voice/twilio.
+    "twilio>=9.3",
+
+    # The conversation brain behind ConversationRelay (bring-our-own-LLM).
+    "anthropic>=0.116",
+
+    # Config validation — every knob from env, nothing hardcoded.
+    "pydantic>=2.8",
+    "pydantic-settings>=2.4",
+    "python-dotenv>=1.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.24",
+]
+
+[project.scripts]
+orchestrator = "orchestrator.cli:main"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["orchestrator*"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]

@@ -13,6 +13,18 @@ Runtime commands (the graph is **event-dispatched** — see INTEGRATION.md for t
 - Interactive ideation loop: `python main.py --interactive`
 - Resume a HITL-frozen thread: `python resume.py <thread_id> approve|reject`
 
+## Sibling project: `dialer/` — Reachwell Orchestrator
+
+`dialer/` is a self-contained Python service (own `pyproject.toml`, venv,
+tests, Dockerfile) unrelated to the swarm graph: the Reachwell AI outbound
+dialer. JustCall is its contact database/event source; Twilio (behind a
+swappable `VoiceProvider` interface) places AI calls via ConversationRelay
+with Claude as the conversation brain. Start with `dialer/README.md`;
+requirements in `dialer/docs/SPEC.md`, module contract in
+`dialer/docs/architecture.md`. Its phases are code-enforced: PHASE=1 is
+dry-run only (zero calls), PHASE=2 a ≤50-contact second-touch slice,
+PHASE=3 full (requires Trust Hub sign-off). Nothing in the swarm imports it.
+
 ## Core Mental Model
 
 The system is a **Darwinian economic organism**, not a typical app. Every design decision is downstream of one metric:

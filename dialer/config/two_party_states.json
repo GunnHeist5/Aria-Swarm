@@ -1,0 +1,4 @@
+{
+  "_comment": "All-party ('two-party') recording-consent states. When a prospect's state is listed here, TWO_PARTY_POLICY applies: 'disclose' appends a recording disclosure to the agent script, 'no_record' disables recording for the call. Unknown/None states are treated as all-party by the code (fail closed). This list is a common-knowledge starting point, NOT legal advice — VERIFY WITH COUNSEL before production dialing; several states have nuanced carve-outs (e.g. CT civil/criminal split, MI participant ambiguity, NV interpretation via case law).",
+  "states": ["CA", "CT", "DE", "FL", "IL", "MD", "MA", "MI", "MT", "NV", "NH", "OR", "PA", "WA"]
+}

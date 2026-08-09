@@ -1,0 +1,11 @@
+{
+  "_comment": "Per-state calling-window overrides in the PROSPECT's local time. Shape: {\"XX\": {\"start\": \"HH:MM\", \"end\": \"HH:MM\"}}. Top-level keys beginning with '_' are documentation and ignored by the loader. The default window (CALL_WINDOW_START..CALL_WINDOW_END, 09:00-17:00) is already stricter than the federal TCPA 8am-9pm rule and than most state telemarketing statutes, so this table ships with NO active overrides. Add an entry ONLY to narrow a state further; an override REPLACES the default for that state. VERIFY WITH COUNSEL before relying on, adding, or loosening anything here — this file is compliance input, not tuning.",
+  "_example_do_not_use": { "XX": { "start": "10:00", "end": "16:00" } },
+  "_known_stricter_state_notes_verify_with_counsel": {
+    "AL": "Alabama telemarketing statute limits calls to 8am-8pm local — the 09:00-17:00 default already complies; no override needed.",
+    "MS": "Mississippi limits telemarketing to 8am-8pm — default already complies.",
+    "RI": "Rhode Island limits telephone sales calls to 9am-6pm Mon-Fri (Saturday morning rules differ) — default weekday hours comply; weekend policy is a code-level knob, not a window override.",
+    "SC": "South Carolina limits telemarketing to 8am-9pm — default already complies.",
+    "LA": "Louisiana has additional holiday/disaster-declaration restrictions that a static window cannot express — handle operationally."
+  }
+}

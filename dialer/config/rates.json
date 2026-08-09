@@ -1,0 +1,9 @@
+{
+  "_comment": "Unit costs used by orchestrator/report/costs.py. Update when Twilio or Anthropic reprice. voice/relay/intelligence are USD per started minute; llm rates are USD per million tokens (claude-opus-5 list prices).",
+  "voice_per_min": 0.014,
+  "relay_per_min": 0.07,
+  "intelligence_per_min": 0.025,
+  "number_monthly": 1.15,
+  "llm_input_per_mtok": 5.0,
+  "llm_output_per_mtok": 25.0
+}
