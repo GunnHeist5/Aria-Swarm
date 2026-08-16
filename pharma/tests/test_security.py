@@ -83,6 +83,17 @@ def test_raw_keys_never_stored(demo_tenant):
     assert all(raw_key not in r["key_hash"] for r in rows)
 
 
+def test_browser_visits_redirect_to_login_when_signed_out(client):
+    # a human clicking a deep link gets the sign-in page...
+    r = client.get("/trainer", headers={"Accept": "text/html"}, follow_redirects=False)
+    assert r.status_code == 303 and r.headers["location"] == "/login"
+    r = client.get("/chat", headers={"Accept": "text/html,application/xhtml+xml"},
+                   follow_redirects=False)
+    assert r.status_code == 303
+    # ...while API/polling callers still get a plain 401
+    assert client.get("/chat/analyses/a_0/events").status_code == 401
+
+
 def test_session_cookie_secure_flag_follows_config(client, demo_tenant, monkeypatch):
     from app import config
 
