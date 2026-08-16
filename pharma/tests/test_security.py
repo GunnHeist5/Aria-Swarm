@@ -81,3 +81,15 @@ def test_raw_keys_never_stored(demo_tenant):
     with control.connect() as conn:
         rows = conn.execute("SELECT key_hash FROM api_keys").fetchall()
     assert all(raw_key not in r["key_hash"] for r in rows)
+
+
+def test_session_cookie_secure_flag_follows_config(client, demo_tenant, monkeypatch):
+    from app import config
+
+    _, raw_key = demo_tenant
+    r = client.post("/login", data={"token": raw_key}, follow_redirects=False)
+    assert "secure" not in r.headers["set-cookie"].lower()
+
+    monkeypatch.setattr(config, "COOKIE_SECURE", True)
+    r = client.post("/login", data={"token": raw_key}, follow_redirects=False)
+    assert "secure" in r.headers["set-cookie"].lower()

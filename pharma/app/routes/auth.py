@@ -29,6 +29,7 @@ def login(request: Request, token: str = Form(...)):
         max_age=config.SESSION_MAX_AGE,
         httponly=True,
         samesite="lax",
+        secure=config.COOKIE_SECURE,
     )
     return response
 

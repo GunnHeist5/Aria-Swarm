@@ -22,6 +22,9 @@ make dev                        # http://127.0.0.1:8100
 Sign in at `/login` with one of the printed tokens. Clients land on the analyst
 chat; trainers on the review console; admins on tenant/key management.
 
+**Going live** (real HTTPS address so the trainer can log in from any browser):
+see [`DEPLOY.md`](DEPLOY.md) — systemd service + Cloudflare Tunnel, ~15 minutes.
+
 ## Demo script
 
 1. `make seed` prints three tokens. Sign in with the **client** token.

@@ -23,6 +23,10 @@ SECRET_KEY = os.environ.get("PHARMA_SECRET_KEY", "")
 SESSION_COOKIE = "pharma_session"
 SESSION_MAX_AGE = 12 * 3600  # seconds
 
+# Set PHARMA_COOKIE_SECURE=1 once the app is served over HTTPS (e.g. behind the
+# Cloudflare tunnel) so session cookies are never sent over plain HTTP.
+COOKIE_SECURE = os.environ.get("PHARMA_COOKIE_SECURE", "") == "1"
+
 # Subscription tiers: analyses per month. Soft-blocked at the limit.
 TIERS = {
     "starter": {"price_usd": 2000, "analyses_per_month": 20},

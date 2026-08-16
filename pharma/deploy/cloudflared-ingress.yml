@@ -1,0 +1,16 @@
+# Example cloudflared ingress for the pharma app.
+#
+# If the server already runs a named tunnel (the deal desk uses one), do NOT
+# create a second tunnel — add the pharma hostname to the EXISTING config
+# (usually /etc/cloudflared/config.yml). Ingress rules match top-to-bottom;
+# the catch-all http_status:404 must stay last.
+
+tunnel: YOUR-TUNNEL-ID
+credentials-file: /root/.cloudflared/YOUR-TUNNEL-ID.json
+
+ingress:
+  # --- add this entry (keep any existing entries, e.g. the deal desk) ---
+  - hostname: pharma.YOURDOMAIN.com
+    service: http://127.0.0.1:8100
+  # --- existing entries stay here ---
+  - service: http_status:404
