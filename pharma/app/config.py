@@ -37,6 +37,10 @@ SANDBOX_RSS_BYTES = 1024**3  # 1 GiB
 
 MAX_UPLOAD_BYTES = 50 * 1024**2
 
+# Max problems a single web-triggered gym run may attempt; full batches go
+# through the CLI, which takes an explicit --limit.
+GYM_WEB_RUN_LIMIT = 5
+
 
 def control_db_path() -> Path:
     return DATA_DIR / "control.db"
@@ -48,3 +52,11 @@ def knowledge_db_path() -> Path:
 
 def tenants_root() -> Path:
     return DATA_DIR / "tenants"
+
+
+def gym_db_path() -> Path:
+    return DATA_DIR / "gym.db"
+
+
+def gym_files_root() -> Path:
+    return DATA_DIR / "gym_files"

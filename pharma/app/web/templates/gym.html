@@ -1,0 +1,48 @@
+{% extends "base.html" %}
+{% block title %}Training gym — Aria Pharma{% endblock %}
+{% block nav %}<a href="/trainer">Trainer console</a><a href="/trainer/gym">Training gym</a>{% endblock %}
+{% block content %}
+<h1>Training gym</h1>
+<p class="muted">Practice problem sets with answer keys. The analyst attempts each problem without ever seeing the key; an auto-grader scores answer <em>and</em> steps; you review only the misses.</p>
+{% if error %}<p class="error">{{ error }} — you can still add problems manually on a set page.</p>{% endif %}
+
+<section class="card">
+  <h2>Problem sets</h2>
+  <table>
+    <tr><th>Title</th><th>Domain</th><th>Confirmed</th><th>Drafts</th><th>Latest run</th><th></th></tr>
+    {% for s in sets %}
+    <tr>
+      <td>{{ s.title }}</td>
+      <td>{{ s.domain or 'general' }}</td>
+      <td>{{ s.confirmed }}</td>
+      <td>{{ s.drafts }}</td>
+      <td>{{ s.latest_pass_rate }} passed</td>
+      <td><a class="button small" href="/trainer/gym/sets/{{ s.set_id }}">Open</a></td>
+    </tr>
+    {% else %}
+    <tr><td colspan="6" class="muted">No problem sets yet — ingest one below.</td></tr>
+    {% endfor %}
+  </table>
+</section>
+
+<section class="card">
+  <h2>Ingest a problem-set document</h2>
+  <p class="muted small">PDF/markdown/text are split into problems automatically (you review each before it runs). CSV/XLSX use columns: <code>problem, answer</code> required, <code>steps, kind, domain</code> optional. Decks (.pptx) are stored for manual paste.</p>
+  <form method="post" action="/trainer/gym/ingest" enctype="multipart/form-data" class="upload">
+    <input type="file" name="file" required>
+    <input name="title" placeholder="Set title" required>
+    <select name="domain">{% for d in domains %}<option>{{ d }}</option>{% endfor %}</select>
+    <button type="submit">Ingest</button>
+  </form>
+</section>
+
+<section class="card">
+  <h2>Paste problems as text</h2>
+  <form method="post" action="/trainer/gym/paste">
+    <input name="title" placeholder="Set title" required>
+    <select name="domain">{% for d in domains %}<option>{{ d }}</option>{% endfor %}</select>
+    <textarea name="text" rows="8" placeholder="Paste problems, worked steps, and answers…" required></textarea>
+    <button type="submit">Split into problems</button>
+  </form>
+</section>
+{% endblock %}

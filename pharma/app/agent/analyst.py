@@ -46,6 +46,8 @@ class AnalysisResult:
     analysis_id: str
     status: str  # done | failed | refused
     answer: str
+    tokens_in: int = 0
+    tokens_out: int = 0
 
 
 def _usage_of(response: Any) -> tuple[int, int]:
@@ -56,7 +58,8 @@ def _usage_of(response: Any) -> tuple[int, int]:
 
 
 def run_analysis(tenant_id: str, question: str, conversation_id: str | None = None,
-                 llm: LLM | None = None) -> AnalysisResult:
+                 llm: LLM | None = None,
+                 on_tool_event: Callable[[dict], None] | None = None) -> AnalysisResult:
     tdb.validate_tenant_id(tenant_id)
     if llm is None:
         llm = AnthropicLLM()
@@ -111,6 +114,11 @@ def run_analysis(tenant_id: str, question: str, conversation_id: str | None = No
                                     "content": f"Tool error: {exc}", "is_error": True})
                 else:
                     results.append({"type": "tool_result", "tool_use_id": block.id, "content": out})
+                if on_tool_event:
+                    on_tool_event({"type": "tool_use", "name": block.name, "input": block.input or {}})
+                    on_tool_event({"type": "tool_result", "name": block.name,
+                                   "content": str(results[-1]["content"])[:4000],
+                                   "is_error": bool(results[-1].get("is_error"))})
             messages.append({"role": "user", "content": results})
         else:
             answer = "Analysis stopped: exceeded the maximum number of steps."
@@ -122,4 +130,5 @@ def run_analysis(tenant_id: str, question: str, conversation_id: str | None = No
             if answer:
                 tdb.add_message(tenant_id, conversation_id, "assistant", answer)
 
-    return AnalysisResult(analysis_id=analysis_id, status=status, answer=answer)
+    return AnalysisResult(analysis_id=analysis_id, status=status, answer=answer,
+                          tokens_in=tokens_in, tokens_out=tokens_out)

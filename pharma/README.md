@@ -39,6 +39,36 @@ chat; trainers on the review console; admins on tenant/key management.
    anonymization scan → edit → approve. Only approved+anonymized methods are
    ever retrievable.
 
+## Training Gym (how the expert "trains" it)
+
+The trainer's problem set + answer key drive a practice-and-grading loop at
+`/trainer/gym` (trainer/admin roles only):
+
+1. **Ingest** — upload a document or paste text; an LLM splits it into
+   candidate problems ({prompt, expected steps, answer key}); CSV/XLSX with
+   `problem, answer` (+ optional `steps, kind, domain`) columns parse directly
+   with no LLM. Everything lands as a draft the trainer reviews, edits, and
+   confirms. Data problems require an attached dataset before confirming.
+2. **Run** — each confirmed problem is executed by the real analyst loop
+   inside a dedicated "Training Gym" practice tenant (same tools, same
+   sandbox; the agent never sees the answer key). Web runs are capped at 5;
+   full batches: `python -m app.cli gym-run <set_id> [--limit N]`, resumable
+   with `--resume <run_id>`.
+3. **Grade** — an auto-grader scores answer AND steps against the key
+   (pass/partial/fail + concrete gaps; anything unparseable fails closed into
+   the queue). The trainer reviews only the misses.
+4. **Correct** — one click turns a miss into a draft method that walks the
+   same anonymization-scan + approval gate as everything else. Re-run the set;
+   the scorecard shows the trend.
+
+Raw problem sets live in their own `gym.db` — never retrievable by any tenant;
+the only path from gym content into production behavior is the approval gate.
+
+Try it: `python -m app.cli gym-init`, then
+`python -m app.cli gym-ingest sample_data/demo_problems.csv "Brand analytics drills" brand_analytics`,
+attach `sample_data/demo_sales.csv` to the data problem in the console,
+confirm, run.
+
 ## Tests
 
 ```sh

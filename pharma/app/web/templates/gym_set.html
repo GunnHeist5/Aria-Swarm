@@ -1,0 +1,162 @@
+{% extends "base.html" %}
+{% block title %}{{ set.title }} — Training gym{% endblock %}
+{% block nav %}<a href="/trainer">Trainer console</a><a href="/trainer/gym">Training gym</a>{% endblock %}
+{% block content %}
+<h1>{{ set.title }} <span class="badge">{{ set.domain or 'general' }}</span></h1>
+{% if error %}<p class="error">{{ error }}</p>{% endif %}
+
+<section class="card">
+  <h2>Problems</h2>
+  {% for p in problems %}
+  <details class="method {{ p.status }}">
+    <summary><strong>#{{ p.seq }}</strong> {{ p.prompt_md[:90] }}{% if p.prompt_md|length > 90 %}…{% endif %}
+      — <span class="badge {{ 'approved' if p.status == 'confirmed' else p.status }}">{{ p.status }}</span>
+      <span class="badge">{{ p.kind }}</span>
+      {% if p.dataset_filename %}<span class="badge">📄 {{ p.dataset_filename }}</span>{% endif %}
+    </summary>
+    {% if p.status == 'draft' %}
+    <form method="post" action="/trainer/gym/problems/{{ p.problem_id }}/edit">
+      <label class="small">Prompt (what the analyst sees)</label>
+      <textarea name="prompt_md" rows="4" required>{{ p.prompt_md }}</textarea>
+      <label class="small">Expected steps (grading guide, never shown to the analyst)</label>
+      <textarea name="expected_steps_md" rows="4">{{ p.expected_steps_md or '' }}</textarea>
+      <label class="small">Answer key (ground truth, never shown to the analyst)</label>
+      <textarea name="answer_key_md" rows="4" required>{{ p.answer_key_md }}</textarea>
+      <div class="row">
+        <select name="kind">
+          <option value="conceptual" {{ 'selected' if p.kind == 'conceptual' }}>conceptual</option>
+          <option value="data" {{ 'selected' if p.kind == 'data' }}>data</option>
+        </select>
+        <select name="domain">{% for d in domains %}<option {{ 'selected' if p.domain == d }}>{{ d }}</option>{% endfor %}</select>
+        <button type="submit">Save edits</button>
+      </div>
+    </form>
+    <div class="row">
+      <form method="post" action="/trainer/gym/problems/{{ p.problem_id }}/dataset" enctype="multipart/form-data" class="inline">
+        <input type="file" name="file" accept=".csv,.xlsx">
+        <button type="submit">Attach dataset</button>
+      </form>
+      <form method="post" action="/trainer/gym/problems/{{ p.problem_id }}/confirm" class="inline">
+        <button type="submit" class="primary">Confirm</button>
+      </form>
+      <form method="post" action="/trainer/gym/problems/{{ p.problem_id }}/retire" class="inline">
+        <button type="submit" class="danger">Retire</button>
+      </form>
+    </div>
+    {% else %}
+    <p><strong>Prompt:</strong></p><pre class="body-view">{{ p.prompt_md }}</pre>
+    <p><strong>Expected steps:</strong></p><pre class="body-view">{{ p.expected_steps_md or '(none)' }}</pre>
+    <p><strong>Answer key:</strong></p><pre class="body-view">{{ p.answer_key_md }}</pre>
+    {% if p.status == 'confirmed' %}
+    <form method="post" action="/trainer/gym/problems/{{ p.problem_id }}/retire" class="inline">
+      <button type="submit" class="danger">Retire</button>
+    </form>
+    {% endif %}
+    {% endif %}
+  </details>
+  {% else %}
+  <p class="muted">No problems in this set yet.</p>
+  {% endfor %}
+</section>
+
+<section class="card">
+  <h2>Add a problem manually</h2>
+  <form method="post" action="/trainer/gym/sets/{{ set.set_id }}/problems">
+    <textarea name="prompt_md" rows="3" placeholder="Problem prompt" required></textarea>
+    <textarea name="expected_steps_md" rows="3" placeholder="Expected steps (optional)"></textarea>
+    <textarea name="answer_key_md" rows="3" placeholder="Answer key" required></textarea>
+    <div class="row">
+      <select name="kind"><option>conceptual</option><option>data</option></select>
+      <select name="domain">{% for d in domains %}<option>{{ d }}</option>{% endfor %}</select>
+      <button type="submit">Add draft</button>
+    </div>
+  </form>
+</section>
+
+<section class="card">
+  <h2>Run</h2>
+  <form method="post" action="/trainer/gym/sets/{{ set.set_id }}/run" class="row">
+    <label>Problems this run: <input type="number" name="limit" value="{{ web_limit }}" min="1" max="{{ web_limit }}" style="width:5em"></label>
+    <button type="submit">Run now</button>
+  </form>
+  {% for r in open_runs %}
+  <form method="post" action="/trainer/gym/sets/{{ set.set_id }}/run" class="row">
+    <input type="hidden" name="run_id" value="{{ r.run_id }}">
+    <input type="hidden" name="limit" value="{{ web_limit }}">
+    <button type="submit">Resume run {{ r.run_id }}</button>
+  </form>
+  {% endfor %}
+  <p class="muted small">Web runs are capped at {{ web_limit }} problems and block until done. For full batches use:
+    <code>python -m app.cli gym-run {{ set.set_id }}</code></p>
+</section>
+
+<section class="card">
+  <h2>Scorecard</h2>
+  <table>
+    <tr><th>Run</th><th>Started</th><th>Graded</th><th>Pass</th><th>Partial</th><th>Fail</th><th>Avg score</th><th>Status</th></tr>
+    {% for r in scorecard %}
+    <tr>
+      <td><code>{{ r.run_id }}</code></td>
+      <td class="small">{{ r.started_at[:16].replace('T', ' ') }}</td>
+      <td>{{ r.graded }}</td><td>{{ r.passes or 0 }}</td><td>{{ r.partials or 0 }}</td><td>{{ r.fails or 0 }}</td>
+      <td>{{ '%.2f'|format(r.avg_score) if r.avg_score is not none else '—' }}</td>
+      <td>{{ r.status }}</td>
+    </tr>
+    {% else %}
+    <tr><td colspan="8" class="muted">No runs yet.</td></tr>
+    {% endfor %}
+  </table>
+  {% if breakdown %}
+  <h2>Latest run by domain</h2>
+  <table>
+    <tr><th>Domain</th><th>Graded</th><th>Pass</th><th>Avg score</th></tr>
+    {% for b in breakdown %}
+    <tr><td>{{ b.domain }}</td><td>{{ b.graded }}</td><td>{{ b.passes or 0 }}</td>
+        <td>{{ '%.2f'|format(b.avg_score) if b.avg_score is not none else '—' }}</td></tr>
+    {% endfor %}
+  </table>
+  {% endif %}
+</section>
+
+<section class="card">
+  <h2>Miss queue ({{ misses|length }})</h2>
+  {% for m in misses %}
+  <details class="method">
+    <summary><strong>#{{ m.seq }}</strong> — <span class="badge rejected">{{ m.verdict }}</span>
+      score {{ '%.2f'|format(m.score) }} — {{ m.prompt_md[:70] }}…</summary>
+    <div class="flags"><strong>Gaps:</strong>
+      <ul>{% for g in m.gaps %}<li>{{ g }}</li>{% endfor %}</ul>
+    </div>
+    <p><strong>Analyst's answer:</strong></p><pre class="body-view">{{ m.answer_md or '(none)' }}</pre>
+    <p><strong>Answer key:</strong></p><pre class="body-view">{{ m.answer_key_md }}</pre>
+    <details><summary class="small">Tool transcript</summary><pre class="body-view small">{{ m.transcript_json }}</pre></details>
+
+    <h3 class="small">File a correction (becomes a draft method → scan → approve)</h3>
+    <form method="post" action="/trainer/gym/grades/{{ m.grade_id }}/correction">
+      <input name="title" placeholder="Method title" required>
+      <select name="domain">{% for d in domains %}<option {{ 'selected' if m.domain == d }}>{{ d }}</option>{% endfor %}</select>
+      <textarea name="body_md" rows="6" required>{% for g in m.gaps %}- {{ g }}
+{% endfor %}</textarea>
+      {% if approved_methods %}
+      <p class="muted small">Tip: if this revises an existing method, copy its text as your starting point:
+        {% for am in approved_methods %}<code>{{ am.title }}</code> {% endfor %}</p>
+      {% endif %}
+      <button type="submit" class="primary">File correction draft</button>
+    </form>
+    <div class="row">
+      <form method="post" action="/trainer/gym/grades/{{ m.grade_id }}/override" class="inline">
+        <input type="hidden" name="override" value="grader_wrong">
+        <input name="note" placeholder="Why the grade is wrong">
+        <button type="submit">Grader wrong</button>
+      </form>
+      <form method="post" action="/trainer/gym/grades/{{ m.grade_id }}/override" class="inline">
+        <input type="hidden" name="override" value="agree">
+        <button type="submit">Agree, no action</button>
+      </form>
+    </div>
+  </details>
+  {% else %}
+  <p class="muted">No unreviewed misses.</p>
+  {% endfor %}
+</section>
+{% endblock %}
