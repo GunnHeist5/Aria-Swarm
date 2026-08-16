@@ -403,6 +403,28 @@ def run_scorecard(set_id: str) -> list[dict]:
     return [dict(r) for r in rows]
 
 
+def run_progress(run_id: str) -> list[dict]:
+    """Per-problem live state for one run: pending | running | done/failed/refused,
+    with verdict/score once graded. Derived entirely from existing tables."""
+    run = get_run(run_id)
+    if not run:
+        raise ValueError("unknown run")
+    with connect() as conn:
+        rows = conn.execute(
+            "SELECT p.seq, p.problem_id,"
+            " COALESCE(a.status, 'pending') AS status,"
+            " a.created_at AS attempt_created_at,"
+            " g.verdict, g.score"
+            " FROM problems p"
+            " LEFT JOIN attempts a ON a.problem_id = p.problem_id AND a.run_id = ?"
+            " LEFT JOIN grades g ON g.attempt_id = a.attempt_id"
+            " WHERE p.set_id = ? AND p.status = 'confirmed'"
+            " ORDER BY p.seq",
+            (run_id, run["set_id"]),
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
 def domain_breakdown(run_id: str) -> list[dict]:
     with connect() as conn:
         rows = conn.execute(

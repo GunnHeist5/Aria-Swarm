@@ -86,9 +86,20 @@ def run_one(run_id: str, problem: dict, tenant_id: str,
     try:
         stored = _place_dataset(tenant_id, problem) if problem["kind"] == "data" else None
         question = _compose_question(problem, problem_set["title"], stored)
+        # Pre-create the analysis so the live-view bridge can stream feed rows
+        # under a known id while the transcript list is captured as before.
+        from app import tasks as tasks_mod
+
+        analysis_id = tdb.create_analysis(tenant_id, question)
+        bridge = tasks_mod.make_event_bridge(tenant_id, analysis_id)
+
+        def tee(event: dict) -> None:
+            events.append(event)
+            bridge(event)
+
         result = analyst.run_analysis(
             tenant_id, question, conversation_id=None, llm=llm,
-            on_tool_event=events.append,
+            on_tool_event=tee, analysis_id=analysis_id,
         )
         gym.finish_attempt(attempt_id, result.status, result.answer,
                            json.dumps(events), result.tokens_in, result.tokens_out,

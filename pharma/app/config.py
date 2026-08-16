@@ -45,6 +45,10 @@ MAX_UPLOAD_BYTES = 50 * 1024**2
 # through the CLI, which takes an explicit --limit.
 GYM_WEB_RUN_LIMIT = 5
 
+# A 'running' analysis with no activity for this long is reported as stale
+# (the app restarted mid-run). Read-only judgment — nothing mutates on a poll.
+STALE_AFTER_S = 600
+
 
 def control_db_path() -> Path:
     return DATA_DIR / "control.db"

@@ -59,12 +59,14 @@ def _usage_of(response: Any) -> tuple[int, int]:
 
 def run_analysis(tenant_id: str, question: str, conversation_id: str | None = None,
                  llm: LLM | None = None,
-                 on_tool_event: Callable[[dict], None] | None = None) -> AnalysisResult:
+                 on_tool_event: Callable[[dict], None] | None = None,
+                 analysis_id: str | None = None) -> AnalysisResult:
     tdb.validate_tenant_id(tenant_id)
     if llm is None:
         llm = AnthropicLLM()
 
-    analysis_id = tdb.create_analysis(tenant_id, question, conversation_id)
+    if analysis_id is None:
+        analysis_id = tdb.create_analysis(tenant_id, question, conversation_id)
     specs, impls = toolbox_mod.build_toolbox(tenant_id, analysis_id)
 
     context = retrieval.engagement_context(tenant_id, question)

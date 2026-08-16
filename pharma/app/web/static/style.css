@@ -46,3 +46,9 @@ aside .conv-list a.active, aside .conv-list a:hover { background: #e6eaf2; }
 .login-card form { display: flex; flex-direction: column; gap: .7rem; }
 .upload { display: flex; gap: .6rem; align-items: center; margin-bottom: 1rem; }
 code { background: #eef1f5; padding: .1rem .35rem; border-radius: 4px; word-break: break-all; }
+.msg.activity { border-left: 3px solid #b8860b; }
+.msg.activity ul, #run-feed { list-style: none; padding-left: 0; margin: .2rem 0; color: #444d5e; font-size: .92em; }
+.msg.activity li::before, #run-feed li::before { content: "· "; color: #9aa3b5; }
+.feed-error { color: #8d2222; }
+.pulse { animation: pulse 1.6s ease-in-out infinite; }
+@keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: .35; } }

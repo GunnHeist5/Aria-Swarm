@@ -73,6 +73,52 @@
   </form>
 </section>
 
+{% if watch_run %}
+<section class="card" id="run-watch" data-run="{{ watch_run }}">
+  <h2>Run in progress <span class="pulse muted small" id="run-pulse">working…</span></h2>
+  <p class="small"><span id="run-count">–</span> · <span id="run-activity" class="muted"></span></p>
+  <ul id="run-feed" class="small"></ul>
+</section>
+<script>
+(function () {
+  var box = document.getElementById('run-watch');
+  if (!box) return;
+  var runId = box.dataset.run, shown = {}, sawInFlight = false;
+  function tick() {
+    fetch('/trainer/gym/runs/' + encodeURIComponent(runId) + '/status',
+          {credentials: 'same-origin'})
+      .then(function (r) { if (!r.ok) throw new Error(r.status); return r.json(); })
+      .then(function (d) {
+        if (d.in_flight) sawInFlight = true;
+        document.getElementById('run-count').textContent =
+          d.attempted + '/' + d.total + ' problems attempted';
+        document.getElementById('run-activity').textContent = d.current_activity || '';
+        d.problems.forEach(function (p) {
+          if (p.status !== 'pending' && p.status !== 'running' && !shown[p.seq]) {
+            shown[p.seq] = true;
+            var li = document.createElement('li');
+            li.textContent = '#' + p.seq + ' ' + p.status +
+              (p.verdict ? ' — ' + p.verdict + ' ' + (p.score != null ? p.score.toFixed(2) : '') : '');
+            document.getElementById('run-feed').appendChild(li);
+          }
+        });
+        if (d.run_status === 'done' || (sawInFlight && !d.in_flight)) {
+          location.href = window.location.pathname;
+        } else if (d.run_status === 'stale') {
+          document.getElementById('run-pulse').textContent =
+            'run appears to have stopped (server may have restarted)';
+          document.getElementById('run-pulse').classList.remove('pulse');
+        } else {
+          setTimeout(tick, 2000);
+        }
+      })
+      .catch(function () { setTimeout(tick, 4000); });
+  }
+  tick();
+})();
+</script>
+{% endif %}
+
 <section class="card">
   <h2>Run</h2>
   <form method="post" action="/trainer/gym/sets/{{ set.set_id }}/run" class="row">
@@ -86,7 +132,7 @@
     <button type="submit">Resume run {{ r.run_id }}</button>
   </form>
   {% endfor %}
-  <p class="muted small">Web runs are capped at {{ web_limit }} problems and block until done. For full batches use:
+  <p class="muted small">Web runs are capped at {{ web_limit }} problems and show live progress here. For full batches use:
     <code>python -m app.cli gym-run {{ set.set_id }}</code></p>
 </section>
 

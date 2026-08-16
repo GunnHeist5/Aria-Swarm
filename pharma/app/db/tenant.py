@@ -76,6 +76,14 @@ CREATE TABLE IF NOT EXISTS reviews (
     correction_text TEXT,
     created_at  TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS analysis_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    analysis_id TEXT NOT NULL REFERENCES analyses(analysis_id),
+    kind        TEXT NOT NULL,
+    text        TEXT NOT NULL,
+    created_at  TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_events_analysis ON analysis_events(analysis_id, id);
 """
 
 
@@ -185,7 +193,44 @@ def list_messages(tenant_id: str, conversation_id: str) -> list[dict]:
     return [dict(r) for r in rows]
 
 
-# --- analyses / deliverables ----------------------------------------------
+# --- analyses / deliverables / live events --------------------------------
+
+def add_analysis_event(tenant_id: str, analysis_id: str, kind: str, text: str) -> None:
+    with tenant_db(tenant_id) as conn:
+        conn.execute(
+            "INSERT INTO analysis_events (analysis_id, kind, text, created_at) VALUES (?,?,?,?)",
+            (analysis_id, kind, text, _now()),
+        )
+
+
+def list_analysis_events(tenant_id: str, analysis_id: str, after_id: int = 0) -> list[dict]:
+    with tenant_db(tenant_id) as conn:
+        rows = conn.execute(
+            "SELECT * FROM analysis_events WHERE analysis_id = ? AND id > ? ORDER BY id",
+            (analysis_id, after_id),
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def get_analysis(tenant_id: str, analysis_id: str) -> dict | None:
+    with tenant_db(tenant_id) as conn:
+        row = conn.execute(
+            "SELECT * FROM analyses WHERE analysis_id = ?", (analysis_id,)
+        ).fetchone()
+    return dict(row) if row else None
+
+
+def latest_running_analysis(tenant_id: str, conversation_id: str | None = None) -> dict | None:
+    query = "SELECT * FROM analyses WHERE status = 'running'"
+    params: tuple = ()
+    if conversation_id:
+        query += " AND conversation_id = ?"
+        params = (conversation_id,)
+    query += " ORDER BY created_at DESC LIMIT 1"
+    with tenant_db(tenant_id) as conn:
+        row = conn.execute(query, params).fetchone()
+    return dict(row) if row else None
+
 
 def create_analysis(tenant_id: str, question: str, conversation_id: str | None = None) -> str:
     analysis_id = "a_" + uuid.uuid4().hex[:12]

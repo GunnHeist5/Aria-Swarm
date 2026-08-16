@@ -87,8 +87,14 @@ def _set_ctx(set_id: str, error: str | None = None):
 
 
 @router.get("/sets/{set_id}", response_class=HTMLResponse)
-def set_page(request: Request, set_id: str, identity: Identity = Depends(require_trainer)):
-    return templates.TemplateResponse(request, "gym_set.html", _set_ctx(set_id))
+def set_page(request: Request, set_id: str, watch_run: str | None = None,
+             identity: Identity = Depends(require_trainer)):
+    ctx = _set_ctx(set_id)
+    if watch_run:
+        run = gym.get_run(watch_run)
+        if run and run["set_id"] == set_id:
+            ctx["watch_run"] = watch_run
+    return templates.TemplateResponse(request, "gym_set.html", ctx)
 
 
 @router.post("/sets/{set_id}/problems")
@@ -158,20 +164,82 @@ def retire_problem(problem_id: str, identity: Identity = Depends(require_trainer
     return RedirectResponse(f"/trainer/gym/sets/{problem['set_id']}", status_code=303)
 
 
+def _run_in_flight(run_id: str) -> bool:
+    from app import tasks
+
+    for p in gym.run_progress(run_id):
+        if p["status"] == "running" and p["attempt_created_at"] \
+                and not tasks.is_stale(p["attempt_created_at"]):
+            return True
+    return False
+
+
 @router.post("/sets/{set_id}/run")
 def run_set(request: Request, set_id: str, limit: int = Form(None), run_id: str = Form(None),
             identity: Identity = Depends(require_trainer)):
+    from app import tasks
+
     capped = min(limit or config.GYM_WEB_RUN_LIMIT, config.GYM_WEB_RUN_LIMIT)
-    control.audit(identity.key_id, "gym_run_started", resource=set_id,
-                  detail={"limit": capped, "resume": run_id})
-    try:
-        result = runner.run_set(set_id, limit=capped, run_id=run_id or None)
-    except ValueError as exc:
-        return templates.TemplateResponse(request, "gym_set.html",
-                                          _set_ctx(set_id, str(exc)), status_code=400)
-    control.audit(identity.key_id, "gym_run_finished", resource=result["run_id"],
-                  detail={"attempted": result["attempted"], "remaining": result["remaining"]})
-    return RedirectResponse(f"/trainer/gym/sets/{set_id}", status_code=303)
+    if run_id:
+        run = gym.get_run(run_id)
+        if not run or run["set_id"] != set_id or run["status"] != "running":
+            return templates.TemplateResponse(request, "gym_set.html",
+                                              _set_ctx(set_id, "run cannot be resumed"),
+                                              status_code=400)
+        if _run_in_flight(run_id):
+            return templates.TemplateResponse(request, "gym_set.html",
+                                              _set_ctx(set_id, "that run is still working — watch it below"),
+                                              status_code=409)
+    else:
+        if not gym.list_problems(set_id, status="confirmed"):
+            return templates.TemplateResponse(request, "gym_set.html",
+                                              _set_ctx(set_id, "no confirmed problems in set"),
+                                              status_code=400)
+        run_id = gym.create_run(set_id)
+    control.audit(identity.key_id, "gym_run_started", resource=run_id,
+                  detail={"limit": capped, "set_id": set_id})
+    tasks.spawn(tasks.run_gym_set_task, set_id, capped, run_id, identity.key_id)
+    return RedirectResponse(f"/trainer/gym/sets/{set_id}?watch_run={run_id}", status_code=303)
+
+
+@router.get("/runs/{run_id}/status")
+def run_status(run_id: str, identity: Identity = Depends(require_trainer)):
+    from fastapi.responses import JSONResponse
+
+    from app import tasks
+    from app.db import tenant as tdb
+
+    run = gym.get_run(run_id)
+    if not run:
+        raise HTTPException(status_code=404)
+    progress = gym.run_progress(run_id)
+    in_flight = _run_in_flight(run_id)
+
+    current_activity = None
+    if in_flight:
+        practice_tenant = gym.get_meta("practice_tenant_id")
+        if practice_tenant:
+            running = tdb.latest_running_analysis(practice_tenant)
+            if running:
+                events = tdb.list_analysis_events(practice_tenant, running["analysis_id"])
+                if events:
+                    current_activity = events[-1]["text"]
+
+    run_status_value = run["status"]
+    if run_status_value == "running" and not in_flight:
+        # either between batches (capped web run finished its slice) or stale
+        stuck = any(p["status"] == "running" for p in progress)
+        if stuck:
+            run_status_value = "stale"
+    return JSONResponse({
+        "run_status": run_status_value,
+        "in_flight": in_flight,
+        "attempted": sum(1 for p in progress if p["status"] not in ("pending",)),
+        "total": len(progress),
+        "problems": [{"seq": p["seq"], "status": p["status"], "verdict": p["verdict"],
+                      "score": p["score"]} for p in progress],
+        "current_activity": current_activity,
+    })
 
 
 @router.post("/grades/{grade_id}/override")
