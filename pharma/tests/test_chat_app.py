@@ -275,6 +275,64 @@ def test_chat_ask_file_caps(client, demo_tenant):
     assert r.status_code == 413
 
 
+# --- inline deliverables --------------------------------------------------------
+
+def _save_chart(tenant_id, analysis_id):
+    """Create a file in the tenant workspace and register it via the tool impl."""
+    workspace = tdb.tenant_dir(tenant_id) / "workspace"
+    (workspace / "trend.png").write_bytes(b"\x89PNGfake")
+    _, impls = build_toolbox(tenant_id, analysis_id)
+    return impls["save_deliverable"]("trend.png", "TRx trend", "chart")
+
+
+def test_save_deliverable_emits_feed_event(demo_tenant):
+    tenant_id, _ = demo_tenant
+    analysis_id = tdb.create_analysis(tenant_id, "q")
+    out = _save_chart(tenant_id, analysis_id)
+    assert "Saved deliverable" in out
+    events = [e for e in tdb.list_analysis_events(tenant_id, analysis_id)
+              if e["kind"] == "deliverable"]
+    assert len(events) == 1
+    payload = json.loads(events[0]["text"])
+    assert payload["mime"] == "image/png" and payload["title"] == "TRx trend"
+    assert tdb.get_deliverable(tenant_id, payload["deliverable_id"])
+
+
+def test_save_deliverable_without_analysis_no_event(demo_tenant):
+    tenant_id, _ = demo_tenant
+    workspace = tdb.tenant_dir(tenant_id) / "workspace"
+    (workspace / "solo.png").write_bytes(b"\x89PNGfake")
+    _, impls = build_toolbox(tenant_id)  # no analysis_id
+    assert "Saved deliverable" in impls["save_deliverable"]("solo.png", "Solo", "chart")
+
+
+def test_deliverables_for_conversation_scoped(demo_tenant):
+    tenant_id, _ = demo_tenant
+    conv_a = tdb.create_conversation(tenant_id, "a")
+    conv_b = tdb.create_conversation(tenant_id, "b")
+    analysis_a = tdb.create_analysis(tenant_id, "qa", conv_a)
+    analysis_b = tdb.create_analysis(tenant_id, "qb", conv_b)
+    _save_chart(tenant_id, analysis_a)
+    workspace = tdb.tenant_dir(tenant_id) / "workspace"
+    (workspace / "other.png").write_bytes(b"\x89PNGfake2")
+    _, impls = build_toolbox(tenant_id, analysis_b)
+    impls["save_deliverable"]("other.png", "Other chart", "chart")
+
+    titles_a = [d["title"] for d in tdb.deliverables_for_conversation(tenant_id, conv_a)]
+    assert titles_a == ["TRx trend"]
+
+
+def test_chat_page_shows_conversation_deliverables(client, demo_tenant):
+    tenant_id, raw_key = demo_tenant
+    conv = tdb.create_conversation(tenant_id, "c")
+    analysis_id = tdb.create_analysis(tenant_id, "q", conv)
+    _save_chart(tenant_id, analysis_id)
+    r = client.get(f"/chat?conversation={conv}", headers=_auth(raw_key))
+    assert r.status_code == 200
+    assert "Deliverables from this conversation".lower() in r.text.lower()
+    assert "/download" in r.text and "TRx trend" in r.text
+
+
 def test_form_post_chat_still_works(client, demo_tenant, inline_tasks, monkeypatch):
     _, raw_key = demo_tenant
     monkeypatch.setattr(tasks, "llm_factory",

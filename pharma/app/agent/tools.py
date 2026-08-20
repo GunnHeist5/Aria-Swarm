@@ -172,9 +172,17 @@ def build_toolbox(tenant_id: str, analysis_id: str | None = None,
         dest_rel = f"deliverables/{resolved.name}"
         dest = tdb.resolve_tenant_file(tenant_id, dest_rel)
         resolved.replace(dest)
-        deliverable_id = tdb.add_deliverable(
-            tenant_id, analysis_id, kind, title, dest_rel, _MIME.get(kind, "application/octet-stream")
-        )
+        mime = _MIME.get(kind, "application/octet-stream")
+        deliverable_id = tdb.add_deliverable(tenant_id, analysis_id, kind, title, dest_rel, mime)
+        if analysis_id:
+            try:
+                tdb.add_analysis_event(
+                    tenant_id, analysis_id, "deliverable",
+                    json.dumps({"deliverable_id": deliverable_id, "title": title,
+                                "kind": kind, "mime": mime}),
+                )
+            except Exception:
+                pass  # the feed must never kill an analysis
         return f"Saved deliverable {deliverable_id} ({title})."
 
     def note_learning(text: str) -> str:

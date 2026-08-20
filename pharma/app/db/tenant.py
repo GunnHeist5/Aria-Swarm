@@ -400,6 +400,17 @@ def list_deliverables(tenant_id: str) -> list[dict]:
     return [dict(r) for r in rows]
 
 
+def deliverables_for_conversation(tenant_id: str, conversation_id: str) -> list[dict]:
+    with tenant_db(tenant_id) as conn:
+        rows = conn.execute(
+            "SELECT d.* FROM deliverables d"
+            " JOIN analyses a ON a.analysis_id = d.analysis_id"
+            " WHERE a.conversation_id = ? ORDER BY d.created_at",
+            (conversation_id,),
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
 def get_deliverable(tenant_id: str, deliverable_id: str) -> dict | None:
     with tenant_db(tenant_id) as conn:
         row = conn.execute(

@@ -24,6 +24,8 @@ def _page_ctx(identity: Identity, conversation_id: str | None,
         "conversation_id": conversation_id,
         "messages": messages,
         "watch_analysis": watch_analysis,
+        "deliverables": (tdb.deliverables_for_conversation(identity.tenant_id, conversation_id)
+                         if conversation_id else []),
         "over_limit": control.tenant_over_limit(identity.tenant_id),
         "used": control.analyses_this_month(identity.tenant_id),
     }

@@ -110,6 +110,38 @@ code { background: var(--bg-inset); padding: .1rem .35rem; border-radius: 4px; w
 .chip button { background: none; color: var(--text-muted); padding: 0 .1rem; font-weight: 700; }
 .dropping { outline: 2px dashed var(--accent); outline-offset: -6px; }
 
+/* ---- rendered markdown inside messages ---- */
+.msg .body.md, .msg .part.md, .stream-text.md { white-space: normal; }
+.msg .part h1, .msg .body h1 { font-size: 1.15rem; margin: .6rem 0 .3rem; }
+.msg .part h2, .msg .body h2 { font-size: 1.05rem; margin: .6rem 0 .3rem; }
+.msg .part h3, .msg .body h3, .msg .part h4, .msg .body h4 { font-size: .98rem; margin: .5rem 0 .25rem; }
+.msg .part p, .msg .body p { margin: .35rem 0; white-space: pre-wrap; }
+.msg .part ul, .msg .body ul, .msg .part ol, .msg .body ol { margin: .35rem 0; padding-left: 1.4rem; }
+.msg .part li, .msg .body li { margin: .15rem 0; }
+.msg .part pre, .msg .body pre { background: var(--bg-inset); border: 1px solid var(--border); border-radius: 8px; padding: .6rem .8rem; overflow-x: auto; margin: .4rem 0; }
+.msg .part pre code, .msg .body pre code { background: none; padding: 0; font-size: .85em; }
+.msg .part table, .msg .body table { width: auto; margin: .4rem 0; font-size: .92em; display: block; overflow-x: auto; }
+.msg .part strong, .msg .body strong { color: var(--text); }
+
+/* ---- deliverables in the thread ---- */
+.deliverable-img { max-width: 100%; border: 1px solid var(--border); border-radius: 8px; margin: .35rem 0; display: block; background: #fff; }
+.deliverables-strip { display: flex; flex-direction: column; gap: .4rem; }
+.deliverables-strip .button { align-self: flex-start; }
+
+/* ---- composer states + mobile ---- */
+button.busy { animation: pulse 1.4s ease-in-out infinite; }
+#side-toggle { display: none; }
+@media (max-width: 720px) {
+  #side-toggle { display: inline-block; }
+  .chat-side { position: fixed; left: 0; top: 52px; bottom: 0; width: 78%; max-width: 300px;
+               z-index: 10; transform: translateX(-100%); transition: transform .18s ease;
+               box-shadow: 4px 0 18px rgba(0,0,0,.4); }
+  .chat-side.open { transform: translateX(0); }
+  .thread { padding: .8rem .7rem; }
+  .composer { padding: .6rem .7rem .8rem; }
+  main { margin: 1rem auto; }
+}
+
 /* legacy gym/live-view bits kept working on the dark palette */
 .messages { display: flex; flex-direction: column; gap: .8rem; margin-bottom: 1rem; }
 .msg .body { white-space: pre-wrap; }

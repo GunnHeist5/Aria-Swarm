@@ -21,13 +21,25 @@
         {% if error %}<p class="error">{{ error }}</p>{% endif %}
         {% for m in messages %}
         <div class="msg {{ m.role }}"><span class="role">{{ 'you' if m.role == 'user' else 'analyst' }}</span>
-          <div class="body">{{ m.content }}</div></div>
+          <div class="body" {% if m.role == 'assistant' %}data-md="1"{% endif %}>{{ m.content }}</div></div>
         {% else %}
         {% if not watch_analysis %}
         <p class="muted">Ask a question about your data — attach files right here, or drag them in.
           e.g. “Which region's TRx declined fastest last quarter, and why might that be?”</p>
         {% endif %}
         {% endfor %}
+        {% if deliverables %}
+        <div class="msg assistant deliverables-strip"><span class="role">deliverables from this conversation</span>
+          {% for d in deliverables %}
+          {% if d.mime and d.mime.startswith('image/') %}
+          <a href="/deliverables/{{ d.deliverable_id }}/download" title="{{ d.title }}">
+            <img src="/deliverables/{{ d.deliverable_id }}/download" alt="{{ d.title }}" class="deliverable-img"></a>
+          {% else %}
+          <a class="button small" href="/deliverables/{{ d.deliverable_id }}/download">⬇ {{ d.title }}</a>
+          {% endif %}
+          {% endfor %}
+        </div>
+        {% endif %}
         {% if watch_analysis %}
         <div class="msg user"><span class="role">you</span>
           <div class="body">{{ watch_analysis.question }}</div></div>
@@ -40,6 +52,7 @@
         <div class="chips" id="chips"></div>
         <form id="composer-form" method="post" action="/chat">
           {% if conversation_id %}<input type="hidden" name="conversation" value="{{ conversation_id }}">{% endif %}
+          <button type="button" class="secondary" id="side-toggle" title="Conversations">☰</button>
           <button type="button" class="secondary" id="attach-btn" title="Attach files">📎</button>
           <input type="file" id="file-input" multiple hidden>
           <textarea name="question" id="question" rows="2"
