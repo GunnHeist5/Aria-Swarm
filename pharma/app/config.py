@@ -49,6 +49,19 @@ GYM_WEB_RUN_LIMIT = 5
 # (the app restarted mid-run). Read-only judgment — nothing mutates on a poll.
 STALE_AFTER_S = 600
 
+# ask_user clarifying questions: how long the worker waits for a click, and
+# how often it checks. Module-level so tests can monkeypatch them.
+ASK_TIMEOUT_S = 600
+ASK_POLL_S = 1.0
+
+# Streaming-answer flush throttle: write the partial at most this often
+# (whichever of the two trips first).
+PARTIAL_FLUSH_S = 0.7
+PARTIAL_FLUSH_CHARS = 300
+
+MAX_CHAT_FILES = 5
+DOC_CHUNK_CHARS = 8000
+
 
 def control_db_path() -> Path:
     return DATA_DIR / "control.db"

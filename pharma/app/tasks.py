@@ -8,7 +8,9 @@ injecting scripted LLMs into route-spawned runs.
 
 from __future__ import annotations
 
+import json
 import threading
+import time
 from datetime import datetime, timezone
 
 from app import config
@@ -25,6 +27,8 @@ _TOOL_PHRASES = {
     "run_python": "Running analysis code",
     "search_methods": "Consulting the methods library",
     "note_learning": "Noting an insight",
+    "list_documents": "Checking uploaded documents",
+    "read_document": "Reading a document",
 }
 
 _LIFECYCLE = {
@@ -36,13 +40,20 @@ _LIFECYCLE = {
 
 def friendly_phrase(event: dict) -> tuple[str, str] | None:
     """Map a raw tool event to a (kind, human text) feed line, or None to skip."""
+    if event.get("type") == "assistant_text":
+        return ("assistant", event.get("text", ""))
     if event.get("type") == "tool_use":
+        if event.get("name") == "ask_user":
+            return None  # the tool writes its own richer 'question' event
         if event.get("name") == "save_deliverable":
             title = (event.get("input") or {}).get("title") or "deliverable"
             return ("step", f"Saving deliverable: {title}")
         return ("step", _TOOL_PHRASES.get(event.get("name"), f"Using {event.get('name')}"))
-    if event.get("type") == "tool_result" and event.get("is_error"):
-        return ("error", "Hit an error, adjusting approach")
+    if event.get("type") == "tool_result":
+        if event.get("name") == "ask_user":
+            return None
+        if event.get("is_error"):
+            return ("error", "Hit an error, adjusting approach")
     return None
 
 
@@ -52,10 +63,30 @@ def make_event_bridge(tenant_id: str, analysis_id: str):
             mapped = friendly_phrase(event)
             if mapped:
                 tdb.add_analysis_event(tenant_id, analysis_id, mapped[0], mapped[1])
+                if mapped[0] == "assistant":
+                    # frozen narration replaces the streaming bubble
+                    tdb.clear_analysis_partial(tenant_id, analysis_id)
         except Exception:
             pass  # the feed must never kill an analysis
 
     return bridge
+
+
+def make_partial_writer(tenant_id: str, analysis_id: str):
+    """Throttled writer for the streaming answer bubble."""
+    state = {"t": 0.0, "n": 0}
+
+    def write(text: str) -> None:
+        try:
+            now = time.monotonic()
+            if (now - state["t"] >= config.PARTIAL_FLUSH_S
+                    or len(text) - state["n"] >= config.PARTIAL_FLUSH_CHARS):
+                state["t"], state["n"] = now, len(text)
+                tdb.set_analysis_partial(tenant_id, analysis_id, text)
+        except Exception:
+            pass
+
+    return write
 
 
 def is_stale(last_activity_iso: str) -> bool:
@@ -66,12 +97,27 @@ def is_stale(last_activity_iso: str) -> bool:
     return (datetime.now(timezone.utc) - last).total_seconds() > config.STALE_AFTER_S
 
 
+def _is_older_than(iso_ts: str, seconds: float) -> bool:
+    try:
+        ts = datetime.fromisoformat(iso_ts)
+    except (ValueError, TypeError):
+        return True
+    return (datetime.now(timezone.utc) - ts).total_seconds() > seconds
+
+
 def analysis_live_status(tenant_id: str, analysis: dict) -> str:
-    """running | stale | done | failed | refused — read-only judgment."""
-    if analysis["status"] != "running":
-        return analysis["status"]
+    """running | awaiting_input | stale | done | failed | refused. Read-only.
+
+    awaiting_input is exempt from the normal staleness window for as long as a
+    live waiter could exist (ASK_TIMEOUT_S + 60s grace) — an unanswered question
+    is a user choice, not a dead server."""
+    status = analysis["status"]
+    if status not in ("running", "awaiting_input"):
+        return status
     events = tdb.list_analysis_events(tenant_id, analysis["analysis_id"])
     last = events[-1]["created_at"] if events else analysis["created_at"]
+    if status == "awaiting_input":
+        return "stale" if _is_older_than(last, config.ASK_TIMEOUT_S + 60) else "awaiting_input"
     return "stale" if is_stale(last) else "running"
 
 
@@ -84,6 +130,8 @@ def run_analysis_task(tenant_id: str, question: str, conversation_id: str | None
             tenant_id, question, conversation_id, llm=llm,
             on_tool_event=make_event_bridge(tenant_id, analysis_id),
             analysis_id=analysis_id,
+            on_text_delta=make_partial_writer(tenant_id, analysis_id),
+            interactive=True,
         )
         tdb.add_analysis_event(tenant_id, analysis_id, "lifecycle",
                                _LIFECYCLE.get(result.status, "Analysis finished"))
@@ -94,6 +142,11 @@ def run_analysis_task(tenant_id: str, question: str, conversation_id: str | None
         tdb.add_analysis_event(tenant_id, analysis_id, "lifecycle", "Analysis failed")
         control.audit(key_id, "analysis_finish", tenant_id=tenant_id,
                       resource=analysis_id, detail={"status": "failed"})
+    finally:
+        try:
+            tdb.clear_analysis_partial(tenant_id, analysis_id)
+        except Exception:
+            pass
 
 
 def run_gym_set_task(set_id: str, limit: int, run_id: str, key_id: str) -> None:

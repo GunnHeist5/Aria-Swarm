@@ -22,6 +22,13 @@ make dev                        # http://127.0.0.1:8100
 Sign in at `/login` with one of the printed tokens. Clients land on the analyst
 chat; trainers on the review console; admins on tenant/key management.
 
+The chat is a live, Claude-style experience: attach or drag in files (CSV/XLSX
+become datasets; PDF/Word/PowerPoint/text become readable documents), watch the
+analyst narrate and stream its answer in real time, and answer its clarifying
+questions with one click when a request is ambiguous (interactive chat only —
+gym/batch runs never block on a human). After `git pull` on a server, run
+`.venv/bin/pip install -e '.[dev]'` once to pick up new pinned dependencies.
+
 **Going live** (real HTTPS address so the trainer can log in from any browser):
 see [`DEPLOY.md`](DEPLOY.md) — systemd service + Cloudflare Tunnel, ~15 minutes.
 

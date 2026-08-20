@@ -18,8 +18,10 @@
   </nav>
   <form method="post" action="/logout" class="inline"><button class="link">Log out</button></form>
 </header>
+{% block main %}
 <main>
 {% block content %}{% endblock %}
 </main>
+{% endblock %}
 </body>
 </html>

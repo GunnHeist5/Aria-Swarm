@@ -30,15 +30,24 @@ class AnthropicLLM:
 
         self._client = anthropic.Anthropic()
         self._model = config.PHARMA_MODEL
+        # Set by run_analysis for live typewriter output; called with the
+        # accumulated text of the CURRENT turn on each delta.
+        self.on_text_delta: Any = None
 
     def __call__(self, system: str, messages: list[dict], tools: list[dict]) -> Any:
-        return self._client.messages.create(
-            model=self._model,
-            max_tokens=16000,
-            system=system,
-            messages=messages,
-            tools=tools,
-        )
+        kwargs = dict(model=self._model, max_tokens=16000,
+                      system=system, messages=messages, tools=tools)
+        if self.on_text_delta is None:
+            return self._client.messages.create(**kwargs)
+        with self._client.messages.stream(**kwargs) as stream:
+            acc: list[str] = []
+            for text in stream.text_stream:
+                acc.append(text)
+                try:
+                    self.on_text_delta("".join(acc))
+                except Exception:
+                    pass  # the feed must never kill an analysis
+            return stream.get_final_message()
 
 
 @dataclass
@@ -60,14 +69,21 @@ def _usage_of(response: Any) -> tuple[int, int]:
 def run_analysis(tenant_id: str, question: str, conversation_id: str | None = None,
                  llm: LLM | None = None,
                  on_tool_event: Callable[[dict], None] | None = None,
-                 analysis_id: str | None = None) -> AnalysisResult:
+                 analysis_id: str | None = None,
+                 on_text_delta: Callable[[str], None] | None = None,
+                 interactive: bool = False) -> AnalysisResult:
     tdb.validate_tenant_id(tenant_id)
     if llm is None:
         llm = AnthropicLLM()
+    if on_text_delta is not None:
+        try:
+            llm.on_text_delta = on_text_delta  # no-op on scripted test stubs
+        except Exception:
+            pass
 
     if analysis_id is None:
         analysis_id = tdb.create_analysis(tenant_id, question, conversation_id)
-    specs, impls = toolbox_mod.build_toolbox(tenant_id, analysis_id)
+    specs, impls = toolbox_mod.build_toolbox(tenant_id, analysis_id, interactive=interactive)
 
     context = retrieval.engagement_context(tenant_id, question)
     system = prompts.ANALYST_SYSTEM
@@ -100,6 +116,13 @@ def run_analysis(tenant_id: str, question: str, conversation_id: str | None = No
                 answer = next((b.text for b in response.content if b.type == "text"), "")
                 status = "done"
                 break
+
+            # Interim narration: freeze the turn's text before the tool events
+            # so the live view shows it as a permanent message part.
+            if on_tool_event:
+                turn_text = "".join(b.text for b in response.content if b.type == "text").strip()
+                if turn_text:
+                    on_tool_event({"type": "assistant_text", "text": turn_text})
 
             messages.append({"role": "assistant", "content": response.content})
             results = []

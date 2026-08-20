@@ -84,6 +84,32 @@ CREATE TABLE IF NOT EXISTS analysis_events (
     created_at  TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_events_analysis ON analysis_events(analysis_id, id);
+CREATE TABLE IF NOT EXISTS analysis_partial (
+    analysis_id TEXT PRIMARY KEY,
+    text        TEXT NOT NULL,
+    updated_at  TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS documents (
+    document_id TEXT PRIMARY KEY,
+    filename    TEXT NOT NULL,
+    stored_path TEXT NOT NULL,
+    text        TEXT,
+    text_chars  INTEGER NOT NULL DEFAULT 0,
+    created_at  TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS analysis_questions (
+    question_id  TEXT PRIMARY KEY,
+    analysis_id  TEXT NOT NULL REFERENCES analyses(analysis_id),
+    question     TEXT NOT NULL,
+    options_json TEXT NOT NULL,
+    created_at   TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS analysis_answers (
+    question_id TEXT PRIMARY KEY,
+    analysis_id TEXT NOT NULL,
+    answer      TEXT NOT NULL,
+    created_at  TEXT NOT NULL
+);
 """
 
 
@@ -221,7 +247,7 @@ def get_analysis(tenant_id: str, analysis_id: str) -> dict | None:
 
 
 def latest_running_analysis(tenant_id: str, conversation_id: str | None = None) -> dict | None:
-    query = "SELECT * FROM analyses WHERE status = 'running'"
+    query = "SELECT * FROM analyses WHERE status IN ('running', 'awaiting_input')"
     params: tuple = ()
     if conversation_id:
         query += " AND conversation_id = ?"
@@ -229,6 +255,105 @@ def latest_running_analysis(tenant_id: str, conversation_id: str | None = None) 
     query += " ORDER BY created_at DESC LIMIT 1"
     with tenant_db(tenant_id) as conn:
         row = conn.execute(query, params).fetchone()
+    return dict(row) if row else None
+
+
+def set_analysis_status(tenant_id: str, analysis_id: str, status: str) -> None:
+    """Status flip only (awaiting_input <-> running); finish_analysis owns the
+    terminal states."""
+    with tenant_db(tenant_id) as conn:
+        conn.execute("UPDATE analyses SET status = ? WHERE analysis_id = ?", (status, analysis_id))
+
+
+# --- streaming partial -------------------------------------------------------
+
+def set_analysis_partial(tenant_id: str, analysis_id: str, text: str) -> None:
+    with tenant_db(tenant_id) as conn:
+        conn.execute(
+            "INSERT OR REPLACE INTO analysis_partial (analysis_id, text, updated_at) VALUES (?,?,?)",
+            (analysis_id, text, _now()),
+        )
+
+
+def get_analysis_partial(tenant_id: str, analysis_id: str) -> str | None:
+    with tenant_db(tenant_id) as conn:
+        row = conn.execute(
+            "SELECT text FROM analysis_partial WHERE analysis_id = ?", (analysis_id,)
+        ).fetchone()
+    return row["text"] if row else None
+
+
+def clear_analysis_partial(tenant_id: str, analysis_id: str) -> None:
+    with tenant_db(tenant_id) as conn:
+        conn.execute("DELETE FROM analysis_partial WHERE analysis_id = ?", (analysis_id,))
+
+
+# --- documents ---------------------------------------------------------------
+
+def add_document(tenant_id: str, filename: str, stored_path: str,
+                 text: str | None) -> str:
+    document_id = "doc_" + uuid.uuid4().hex[:12]
+    with tenant_db(tenant_id) as conn:
+        conn.execute(
+            "INSERT INTO documents (document_id, filename, stored_path, text, text_chars, created_at)"
+            " VALUES (?,?,?,?,?,?)",
+            (document_id, filename, stored_path, text, len(text) if text else 0, _now()),
+        )
+    return document_id
+
+
+def list_documents(tenant_id: str) -> list[dict]:
+    with tenant_db(tenant_id) as conn:
+        rows = conn.execute(
+            "SELECT document_id, filename, text_chars, created_at FROM documents"
+            " ORDER BY created_at DESC"
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def get_document(tenant_id: str, document_id: str) -> dict | None:
+    with tenant_db(tenant_id) as conn:
+        row = conn.execute(
+            "SELECT * FROM documents WHERE document_id = ?", (document_id,)
+        ).fetchone()
+    return dict(row) if row else None
+
+
+# --- clarifying questions ------------------------------------------------------
+
+def create_analysis_question(tenant_id: str, analysis_id: str, question: str,
+                             options_json: str) -> str:
+    question_id = "q_" + uuid.uuid4().hex[:12]
+    with tenant_db(tenant_id) as conn:
+        conn.execute(
+            "INSERT INTO analysis_questions (question_id, analysis_id, question, options_json, created_at)"
+            " VALUES (?,?,?,?,?)",
+            (question_id, analysis_id, question, options_json, _now()),
+        )
+    return question_id
+
+
+def get_analysis_question(tenant_id: str, question_id: str) -> dict | None:
+    with tenant_db(tenant_id) as conn:
+        row = conn.execute(
+            "SELECT * FROM analysis_questions WHERE question_id = ?", (question_id,)
+        ).fetchone()
+    return dict(row) if row else None
+
+
+def add_analysis_answer(tenant_id: str, question_id: str, analysis_id: str, answer: str) -> None:
+    with tenant_db(tenant_id) as conn:
+        conn.execute(
+            "INSERT INTO analysis_answers (question_id, analysis_id, answer, created_at) VALUES (?,?,?,?)",
+            (question_id, analysis_id, answer, _now()),
+        )
+
+
+def get_analysis_answer(tenant_id: str, question_id: str) -> dict | None:
+    with tenant_db(tenant_id) as conn:
+        row = conn.execute(
+            "SELECT * FROM analysis_answers WHERE question_id = ?", (question_id,)
+        ).fetchone()
     return dict(row) if row else None
 
 

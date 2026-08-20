@@ -1,10 +1,12 @@
 {% extends "base.html" %}
 {% block title %}Analyst — Aria Pharma{% endblock %}
-{% block content %}
-<div class="two-col">
-  <aside>
+{% block main %}
+<div class="chat-app" id="chat-app"
+     data-conversation="{{ conversation_id or '' }}"
+     data-watch="{{ watch_analysis.analysis_id if watch_analysis else '' }}">
+  <aside class="chat-side">
     <a href="/chat" class="button small">New analysis</a>
-    <ul class="conv-list">
+    <ul class="conv-list" id="conv-list">
       {% for c in conversations %}
       <li><a href="/chat?conversation={{ c.conversation_id }}"
              class="{{ 'active' if c.conversation_id == conversation_id }}">{{ c.title or c.conversation_id }}</a></li>
@@ -12,71 +14,45 @@
     </ul>
     <p class="muted small">{{ used }} analyses used this month</p>
   </aside>
-  <section>
-    {% if error %}<p class="error">{{ error }}</p>{% endif %}
-    <div class="messages">
-      {% for m in messages %}
-      <div class="msg {{ m.role }}"><span class="role">{{ m.role }}</span>
-        <div class="body">{{ m.content }}</div></div>
-      {% else %}
-      {% if not watch_analysis %}
-      <p class="muted">Ask a question about your data — e.g. “Which region's TRx declined fastest last quarter, and why might that be?”</p>
-      {% endif %}
-      {% endfor %}
-      {% if watch_analysis %}
-      <div class="msg user"><span class="role">user</span>
-        <div class="body">{{ watch_analysis.question }}</div></div>
-      <div class="msg activity" id="activity"
-           data-analysis="{{ watch_analysis.analysis_id }}"
-           data-conversation="{{ conversation_id or '' }}">
-        <span class="role">analyst</span>
-        <div class="body">
-          <ul id="feed"></ul>
-          <p id="pulse" class="muted small pulse">working…</p>
-          <noscript><p class="muted small">Analysis running — refresh this page in a minute or two to see the result.</p></noscript>
-        </div>
+
+  <div class="chat-main" id="drop-zone">
+    <div class="thread" id="thread">
+      <div class="thread-inner" id="thread-inner">
+        {% if error %}<p class="error">{{ error }}</p>{% endif %}
+        {% for m in messages %}
+        <div class="msg {{ m.role }}"><span class="role">{{ 'you' if m.role == 'user' else 'analyst' }}</span>
+          <div class="body">{{ m.content }}</div></div>
+        {% else %}
+        {% if not watch_analysis %}
+        <p class="muted">Ask a question about your data — attach files right here, or drag them in.
+          e.g. “Which region's TRx declined fastest last quarter, and why might that be?”</p>
+        {% endif %}
+        {% endfor %}
+        {% if watch_analysis %}
+        <div class="msg user"><span class="role">you</span>
+          <div class="body">{{ watch_analysis.question }}</div></div>
+        {% endif %}
       </div>
-      {% endif %}
     </div>
-    {% if watch_analysis %}
-    <script>
-    (function () {
-      var box = document.getElementById('activity');
-      if (!box) return;
-      var id = box.dataset.analysis, after = 0;
-      function line(text, kind) {
-        var li = document.createElement('li');
-        li.textContent = text;  // textContent only: feed text can echo model-controlled strings
-        if (kind === 'error') li.className = 'feed-error';
-        document.getElementById('feed').appendChild(li);
-      }
-      function tick() {
-        fetch('/chat/analyses/' + encodeURIComponent(id) + '/events?after=' + after,
-              {credentials: 'same-origin'})
-          .then(function (r) { if (!r.ok) throw new Error(r.status); return r.json(); })
-          .then(function (d) {
-            d.events.forEach(function (e) { after = e.seq; line(e.text, e.kind); });
-            if (d.status === 'running') { setTimeout(tick, 1500); }
-            else if (d.status === 'stale') {
-              document.getElementById('pulse').textContent =
-                'This analysis appears to have stopped (the server may have restarted). Please start a new one.';
-              document.getElementById('pulse').classList.remove('pulse');
-            } else {
-              location.href = '/chat?conversation=' + encodeURIComponent(box.dataset.conversation);
-            }
-          })
-          .catch(function () { setTimeout(tick, 4000); });
-      }
-      tick();
-    })();
-    </script>
-    {% endif %}
-    <form method="post" action="/chat" class="ask">
-      {% if conversation_id %}<input type="hidden" name="conversation" value="{{ conversation_id }}">{% endif %}
-      <textarea name="question" rows="3" placeholder="Ask your analyst…" required {% if over_limit %}disabled{% endif %}></textarea>
-      <button type="submit" {% if over_limit %}disabled{% endif %}>Analyze</button>
-      {% if over_limit %}<p class="error">Monthly analysis limit reached.</p>{% endif %}
-    </form>
-  </section>
+
+    <div class="composer">
+      <div class="composer-inner">
+        <div class="chips" id="chips"></div>
+        <form id="composer-form" method="post" action="/chat">
+          {% if conversation_id %}<input type="hidden" name="conversation" value="{{ conversation_id }}">{% endif %}
+          <button type="button" class="secondary" id="attach-btn" title="Attach files">📎</button>
+          <input type="file" id="file-input" multiple hidden>
+          <textarea name="question" id="question" rows="2"
+                    placeholder="Ask your analyst… (Enter to send, Shift+Enter for a new line)"
+                    required {% if over_limit %}disabled{% endif %}></textarea>
+          <button type="submit" id="send-btn" {% if over_limit %}disabled{% endif %}>Send</button>
+        </form>
+        {% if over_limit %}<p class="error small">Monthly analysis limit reached.</p>{% endif %}
+        <p class="hint">Attach CSVs, Excel, PDFs, Word or PowerPoint files — the analyst reads them.</p>
+        <noscript><p class="muted small">JavaScript is off: submitting still works — refresh the page to see the result when it's ready.</p></noscript>
+      </div>
+    </div>
+  </div>
 </div>
+<script src="/static/chat.js"></script>
 {% endblock %}
