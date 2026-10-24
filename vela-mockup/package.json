@@ -1,0 +1,13 @@
+{
+  "name": "vela-mockup",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "setup": "npm install && npx playwright install chromium",
+    "shot": "node scripts/shot.mjs",
+    "overnight": "bash scripts/loop.sh"
+  },
+  "devDependencies": {
+    "playwright": "^1.50.0"
+  }
+}

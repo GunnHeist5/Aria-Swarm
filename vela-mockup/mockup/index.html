@@ -1,0 +1,1236 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Vela · mockup</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+/* ===== Tokens ===== */
+:root{
+  --bg:#F6F7F9; --surface:#FFFFFF; --sunken:#EEF1F4; --chat:#FBFBFC;
+  --ink:#0F172A; --ink-2:#1E293B; --ink-3:#334155; --ink-4:#475569; --muted:#5B6576;
+  --line:#E2E6EC; --line-2:#DDE2E8; --line-3:#C5CDD6;
+  --accent:#0B6E6E; --accent-hover:#084F4F; --accent-ink:#0A5C5C; --accent-soft:#E3F1F0; --accent-band:#D3E8E7;
+  --warn-ink:#8A3E06; --warn-text:#3B2614; --warn-bg:#FFF6EC; --warn-line:#F3D2AC; --warn-soft:#FDEBD6; --warn-btn-line:#E5C9A6;
+  --pdf-bg:#FCE9E6; --pdf-ink:#9F2D20;
+  --slate-line:#64748B;
+  --code-bg:#0F172A; --code-ink:#E2E8F0; --code-muted:#94A3B8;
+  --font:'IBM Plex Sans',system-ui,-apple-system,'Segoe UI',sans-serif;
+  --mono:'IBM Plex Mono',ui-monospace,SFMono-Regular,Menlo,monospace;
+  --r-sm:8px; --r:10px; --r-md:12px; --r-lg:16px;
+  --tap:44px;
+}
+
+/* ===== Base ===== */
+*{box-sizing:border-box}
+html,body{margin:0}
+body{background:var(--bg);color:var(--ink);font-family:var(--font);font-size:14px;line-height:1.45}
+a{color:var(--accent)} a:hover{color:var(--accent-hover)}
+button,input,select,textarea{font:inherit;color:inherit}
+button{cursor:pointer}
+::placeholder{color:var(--muted);opacity:1}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+[hidden]{display:none !important}
+.sr{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
+.mono{font-family:var(--mono)}
+.i{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.75;stroke-linecap:round;stroke-linejoin:round;flex:none}
+.i-sm{width:13px;height:13px}.i-lg{width:19px;height:19px}
+
+/* ===== Buttons and chips ===== */
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;min-height:var(--tap);padding:0 14px;border-radius:var(--r);border:1px solid var(--line-2);background:var(--surface);font-size:13.5px;font-weight:500;text-decoration:none;color:var(--ink)}
+.btn:hover{background:var(--sunken);color:var(--ink)}
+.btn-primary{background:var(--accent);border-color:var(--accent);color:#fff;font-weight:600}
+.btn-primary:hover{background:var(--accent-hover);color:#fff}
+.btn-dark{background:var(--ink);border-color:var(--ink);color:#fff;font-weight:600}
+.btn-dark:hover{background:#1E293B;color:#fff}
+.btn-ghost{border-color:transparent;background:transparent;color:var(--ink-4)}
+.btn-icon{width:var(--tap);padding:0}
+.btn-round{border-radius:50%}
+.pill{border-radius:999px}
+.chip{display:inline-flex;align-items:center;gap:6px;height:26px;padding:0 10px;border-radius:999px;font-size:12px;font-weight:500;background:var(--sunken);color:var(--ink-3)}
+.chip-accent{background:var(--accent-soft);color:var(--accent-ink)}
+.chip-warn{background:var(--warn-soft);color:var(--warn-ink)}
+.label{font-size:12px;font-weight:600;color:var(--muted)}
+
+/* ===== Waiting glyphs ===== */
+.spin{display:inline-block;width:14px;height:14px;border-radius:50%;border:2px solid var(--accent-band);border-top-color:var(--accent);animation:spin .8s linear infinite;flex:none}
+@keyframes spin{to{transform:rotate(360deg)}}
+.mark.is-running .sail{animation:sway 1.6s ease-in-out infinite;transform-origin:12px 19px}
+@keyframes sway{0%,100%{transform:rotate(-5deg)}50%{transform:rotate(5deg)}}
+.skel{display:block;height:12px;border-radius:6px;background:linear-gradient(90deg,var(--sunken) 0%,#F7F8FA 50%,var(--sunken) 100%);background-size:200% 100%;animation:shimmer 1.4s ease-in-out infinite}
+@keyframes shimmer{0%{background-position:200% 0}100%{background-position:-200% 0}}
+@media (prefers-reduced-motion: reduce){
+  .spin{animation:none;border-color:var(--accent)}
+  .mark.is-running .sail,.skel{animation:none}
+}
+
+/* ===== App frame ===== */
+.app{display:flex;flex-wrap:wrap;min-height:100vh}
+.sidebar{flex:1 1 248px;min-width:0;padding:20px 16px;background:var(--sunken);border-right:1px solid var(--line);display:flex;flex-direction:column;gap:22px}
+.content{flex:999 1 760px;min-width:0;display:flex;flex-direction:column}
+.brand{display:flex;align-items:center;gap:10px;padding:0 6px;font-size:18px;font-weight:600;letter-spacing:-.01em}
+.ws-switch{display:flex;align-items:center;justify-content:space-between;gap:8px;width:100%;min-height:52px;padding:8px 12px;border:1px solid var(--line-2);border-radius:var(--r);background:var(--surface);text-align:left}
+.ws-switch b{display:block;font-size:14px}
+.ws-switch small{display:block;font-size:12px;color:var(--muted)}
+.search{position:relative}
+.search .i{position:absolute;left:12px;top:14px;color:var(--muted)}
+.search input{width:100%;height:var(--tap);padding:0 12px 0 36px;border:1px solid var(--line-2);border-radius:var(--r);background:var(--surface);font-size:13.5px}
+.kbd-hint{position:absolute;right:10px;top:12px;padding:0 6px;border:1px solid var(--line-2);border-radius:var(--r-sm);font:11.5px/18px 'IBM Plex Mono',monospace;color:var(--muted);pointer-events:none}
+.search:focus-within .kbd-hint{display:none}
+.nav-group{display:flex;flex-direction:column;gap:2px}
+.nav-group .label{padding:0 10px 6px}
+.nav-item{display:flex;align-items:center;justify-content:space-between;gap:8px;width:100%;min-height:var(--tap);padding:0 10px;border:0;border-radius:var(--r-sm);background:transparent;text-align:left;font-size:13.5px;color:var(--ink-2);text-decoration:none}
+.nav-item:hover{background:#E4E8ED;color:var(--ink-2)}
+.nav-item[aria-current="page"]{background:var(--surface);box-shadow:0 0 0 1px var(--line-2);font-weight:600}
+.nav-item small{font-size:12px;color:var(--muted)}
+.list-row{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:4px 10px;font-size:13px;color:var(--ink-2)}
+.list-row span{display:flex;align-items:center;gap:8px;min-width:0}
+.list-row .i{color:var(--muted)}
+.list-row small{font-size:12px;color:var(--muted)}
+.add-files{display:flex;align-items:center;gap:8px;width:100%;min-height:var(--tap);padding:0 10px;border:1px dashed var(--line-3);border-radius:var(--r-sm);background:transparent;text-align:left;font-size:13px;color:var(--accent-ink);font-weight:500}
+.device{margin-top:auto;background:var(--surface);border:1px solid var(--line-2);border-radius:var(--r-md);padding:14px;display:flex;flex-direction:column;gap:9px}
+.device .row{display:flex;align-items:center;gap:8px}
+.meter{height:6px;border-radius:3px;background:var(--line);overflow:hidden}
+.meter span{display:block;height:6px;width:76%;background:var(--accent)}
+@media (max-width:720px){ .sidebar .hide-sm{display:none} }
+
+/* ===== Workspace ===== */
+.ws{display:flex;flex-wrap:wrap;flex:1}
+.chat{flex:999 1 480px;min-width:0;display:flex;flex-direction:column;background:var(--chat)}
+.chat-head{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:12px;padding:12px 24px;border-bottom:1px solid var(--line);background:var(--surface)}
+.chat-head h1{margin:0;font-size:16px;font-weight:600}
+.row-wrap{display:flex;flex-wrap:wrap;align-items:center;gap:10px}
+.thread{width:100%;max-width:760px;margin:0 auto;padding:32px 24px 16px;display:flex;flex-direction:column;gap:28px}
+.user-msg{display:flex;flex-direction:column;align-items:flex-end;gap:10px}
+.files{display:flex;flex-wrap:wrap;justify-content:flex-end;gap:8px}
+.file{display:flex;align-items:center;gap:10px;padding:8px 14px 8px 8px;background:var(--surface);border:1px solid var(--line);border-radius:var(--r-md)}
+.file-ic{display:flex;align-items:center;justify-content:center;width:34px;height:34px;border-radius:var(--r-sm)}
+.file b{display:block;font-size:13px;font-weight:500}
+.att{justify-content:flex-start}
+.att[hidden]{display:none}
+.file .rm{min-width:44px;min-height:44px;margin:-8px -14px -8px -6px;display:flex;align-items:center;justify-content:center;background:none;border:0;border-radius:var(--r-md);color:var(--muted);cursor:pointer}
+.file .rm:hover{color:var(--ink)}
+.file small{display:block;font-size:12px;color:var(--muted)}
+.bubble{max-width:560px;background:#E9EEF3;border-radius:16px 16px 4px 16px;padding:12px 16px;font-size:15px;line-height:1.55}
+.agent{display:flex;flex-direction:column;gap:14px}
+.agent-head{display:flex;align-items:center;gap:10px}
+.agent-head b{font-size:14px}
+.agent-head small{font-size:12px;color:var(--muted)}
+
+/* Run card */
+.run{background:var(--surface);border:1px solid var(--line);border-radius:var(--r-md)}
+.run-head{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:8px;padding:0 6px 0 14px;border-bottom:1px solid #EEF1F4}
+.run-status{display:flex;align-items:center;gap:8px;font-size:13px;font-weight:600}
+.run-glyph{display:flex;align-items:center;justify-content:center;width:20px;height:20px}
+.run-head .btn{min-height:var(--tap);font-weight:500;color:var(--ink-4)}
+.steps{list-style:none;margin:0;padding:6px 8px 8px}
+.progress{display:grid;grid-template-columns:repeat(5,1fr);gap:4px;padding:10px 14px;border-bottom:1px solid #EEF1F4}
+.progress i{height:4px;border-radius:999px;background:var(--line);transition:background .3s}
+.progress i.on{background:var(--accent)}
+.progress i.flag{background:var(--warn-ink)}
+@media (prefers-reduced-motion:reduce){.progress i{transition:none}}
+.step-head{display:grid;grid-template-columns:20px 84px minmax(0,1fr) auto 16px;gap:10px;align-items:center;width:100%;min-height:var(--tap);padding:6px;border:0;border-radius:var(--r-sm);background:transparent;text-align:left;font-size:13px}
+.step-head:hover{background:var(--bg)}
+.step-icon{display:flex;align-items:center;justify-content:center;width:20px;height:20px;border-radius:50%}
+.step-icon .dot{width:8px;height:8px;border-radius:50%;border:1.5px solid var(--line-3)}
+.step[data-status="done"] .step-icon{background:var(--accent-soft);color:var(--accent-ink)}
+.step[data-status="flag"] .step-icon,.step[data-status="fail"] .step-icon{background:var(--warn-soft);color:var(--warn-ink)}
+.step[data-status="fail"] .step-sum{color:var(--warn-ink)}
+.step-name{font-weight:600}
+.step[data-status="queued"] .step-name,.step[data-status="queued"] .step-sum{color:var(--muted)}
+.step-sum{color:var(--ink-3);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.step[data-status="running"] .step-sum{color:var(--accent-ink)}
+.step-time{font-size:12px;color:var(--muted)}
+.step-head .chev{color:var(--muted);transition:transform .15s}
+.step-head[aria-expanded="true"] .chev{transform:rotate(180deg)}
+.step-log{margin:2px 6px 8px 36px;padding:8px 12px;border-left:2px solid var(--line);}
+.step-log ul{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:4px}
+.step-log li{display:grid;grid-template-columns:44px minmax(0,1fr);gap:8px;font-size:12.5px;color:var(--ink-3)}
+.step-log .log-t{font-size:11.5px;color:var(--muted)}
+.step-log .empty{color:var(--muted);font-size:12.5px}
+
+/* Answer */
+.answer{display:flex;flex-direction:column;gap:14px;font-size:15px;line-height:1.6}
+.answer p{margin:0}
+.stream-in{animation:streamIn .35s ease-out both}
+@keyframes streamIn{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:none}}
+@media (prefers-reduced-motion:reduce){.stream-in{animation:none}}
+.num{color:var(--accent);text-decoration:underline;text-decoration-style:dotted;text-underline-offset:3px}
+.thinking{display:flex;flex-direction:column;gap:10px;padding:4px 0}
+.prelim{display:flex;flex-direction:column;gap:10px;padding:14px 16px;border:1px dashed var(--line-3);border-radius:var(--r-md);background:var(--surface)}
+.callout{background:var(--warn-bg);border:1px solid var(--warn-line);border-radius:var(--r-md);padding:16px;display:flex;flex-direction:column;gap:10px}
+.callout h3{display:flex;align-items:center;gap:8px;margin:0;color:var(--warn-ink);font-size:14px;font-weight:600}
+.callout p{font-size:14px;line-height:1.55;color:var(--warn-text)}
+.callout .num{color:var(--warn-ink)}
+.callout .btn-outline-warn{border-color:var(--warn-btn-line);color:var(--warn-text)}
+.callout .btn-link{border:0;background:transparent;color:var(--warn-ink);text-decoration:underline;text-underline-offset:3px;padding:0 10px}
+.decided{display:inline-flex;align-items:center;gap:6px;font-size:13.5px;font-weight:500;color:var(--warn-text)}
+.verified{align-self:flex-start}
+.suggest{display:flex;flex-wrap:wrap;gap:8px}
+.suggest .btn{border-radius:999px;font-weight:400;color:var(--ink-2)}
+
+/* Composer */
+.composer-wrap{width:100%;max-width:760px;margin:0 auto;padding:8px 24px 28px;display:flex;flex-direction:column;gap:8px}
+.composer{background:var(--surface);border:1px solid var(--line-2);border-radius:var(--r-lg);box-shadow:0 1px 3px rgba(15,23,42,.06);padding:12px 12px 8px 16px;display:flex;flex-direction:column;gap:6px}
+.composer textarea{width:100%;border:0;outline:none;resize:none;background:transparent;font-size:15px;line-height:1.5;padding:4px 0}
+.composer-bar{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:8px}
+.composer select{min-height:var(--tap);padding:0 12px;border:1px solid var(--line);border-radius:var(--r);background:var(--bg);font-size:13.5px;color:var(--ink-2)}
+.on-device{display:inline-flex;align-items:center;gap:5px;font-size:12px;color:var(--accent-ink);font-weight:500}
+.mode{display:flex;flex-direction:column;gap:6px;padding:10px 22px 0}
+.mode-seg{display:inline-flex;align-self:flex-start;max-width:100%;padding:4px;gap:4px;background:var(--sunken);border-radius:var(--r-md)}
+.mode-seg button{display:inline-flex;align-items:center;justify-content:center;gap:6px;min-height:var(--tap);padding:0 12px;border:0;border-radius:9px;background:transparent;font-size:13px;color:var(--ink-4)}
+.mode-seg button[aria-checked="true"]{background:var(--surface);box-shadow:0 1px 2px rgba(15,23,42,.08);font-weight:600;color:var(--accent-ink)}
+.mode p{margin:0;font-size:12px;color:var(--ink-4)}
+@media (max-width:720px){.mode{padding:10px 14px 0}.mode-seg{align-self:stretch}.mode-seg button{flex:1;padding:0 8px}}
+.fineprint{text-align:center;font-size:12px;color:var(--muted)}
+
+/* Panel */
+.panel{flex:1 1 380px;min-width:0;background:var(--surface);border-left:1px solid var(--line);padding:18px 24px 28px;display:flex;flex-direction:column;gap:18px}
+.panel-toggle{display:none;width:100%}
+@media (max-width:720px){.panel-toggle{display:inline-flex}.panel:not(.open)>*:not(.panel-head):not(.panel-toggle){display:none!important}.panel{border-left:0;border-top:1px solid var(--line)}}
+.panel-head{display:flex;align-items:baseline;justify-content:space-between;gap:8px}
+.panel-head h2{margin:0;font-size:15px;font-weight:600}
+.tabs{display:flex;gap:4px;padding:4px;background:var(--sunken);border-radius:var(--r-md)}
+.tabs button{flex:1;min-height:var(--tap);border:0;border-radius:9px;background:transparent;font-size:13px;color:var(--ink-4)}
+.tabs button[aria-pressed="true"]{background:var(--surface);box-shadow:0 1px 2px rgba(15,23,42,.08);font-weight:600;color:var(--ink)}
+.scen{display:flex;flex-wrap:wrap;gap:6px}
+.scen button{min-height:var(--tap);padding:0 12px;border:1px solid var(--line-2);border-radius:999px;background:var(--surface);color:var(--ink-3);font-size:13px}
+.scen button[aria-pressed="true"]{border-color:var(--accent);background:var(--accent-soft);color:var(--accent-ink);font-weight:600}
+.chart{position:relative;display:flex;flex-direction:column;gap:8px;margin:0}
+.chart svg{display:block;width:100%;height:auto}
+.chart-skel{display:none;height:200px;border-radius:var(--r);}
+.chart[data-state="pending"] .chart-skel{display:block}
+.chart[data-state="pending"] svg,.chart[data-state="pending"] figcaption{display:none}
+.chart-note{display:none;align-items:center;gap:8px;font-size:12px;color:var(--accent-ink)}
+.chart[data-state="prelim"] .chart-note{display:flex}
+.ax{font-size:11px;fill:var(--muted);font-family:var(--font)}
+.end{text-anchor:end}.mid{text-anchor:middle}
+.grid{stroke:var(--line);stroke-width:1}
+.band{fill:var(--accent);opacity:.14;transition:opacity .6s}
+.chart[data-state="prelim"] .band{opacity:0}
+.p50{fill:none;stroke:var(--accent);stroke-width:2.5;stroke-linejoin:round;stroke-linecap:round;stroke-dasharray:1 0;transition:opacity .3s,stroke-dasharray .8s}
+.chart[data-state="prelim"] .p50{stroke-dasharray:3 5}
+.changed{display:none;gap:4px;padding:10px 12px;border:1px solid var(--warn-line);border-radius:var(--r);background:var(--warn-bg);font-size:13px;color:var(--warn-text)}
+.changed.on{display:flex;flex-direction:column;animation:streamIn .35s ease-out both}
+.changed b{font-size:12px;font-weight:500;color:var(--warn-ink)}
+.changed span{font-family:var(--mono);font-size:13px}
+@media (prefers-reduced-motion:reduce){.changed.on{animation:none}.p50{transition:none}}
+.deck{fill:none;stroke:var(--slate-line);stroke-width:2;stroke-dasharray:5 4;stroke-linecap:round}
+.bear{fill:none;stroke:var(--warn-ink);stroke-width:2;stroke-linecap:round;display:none}
+.chart[data-scenario="deck"] .deck{stroke:var(--ink);stroke-dasharray:none;stroke-width:2.5}
+.chart[data-scenario="deck"] .p50,.chart[data-scenario="bear"] .p50{opacity:.35}
+.chart[data-scenario="bear"] .bear{display:inline}
+.legend{display:flex;flex-wrap:wrap;gap:6px 16px;font-size:12px;color:var(--ink-4)}
+.legend span{display:inline-flex;align-items:center;gap:6px}
+.sw{width:16px;display:inline-block}
+.tiles{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}
+.tile{background:var(--bg);border-radius:var(--r);padding:12px;display:flex;flex-direction:column;gap:4px;min-width:0}
+.tile small{font-size:12px;color:var(--muted)}
+.tile b{font-family:var(--mono);font-size:20px;font-weight:500}
+.tile em{font-style:normal;font-size:11.5px;color:var(--muted)}
+.tile.is-prelim b{color:var(--muted)}
+.drivers{display:flex;flex-direction:column;gap:8px}
+.driver{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:2px 12px;padding:10px 12px;border:1px solid var(--line);border-radius:var(--r);text-decoration:none;color:var(--ink)}
+.driver:hover{border-color:var(--line-3);color:var(--ink)}
+.driver b{font-size:13.5px;font-weight:500}
+.driver .v{font-family:var(--mono);font-size:14px;font-weight:500}
+.driver small{grid-column:1/-1;font-size:12px;color:var(--muted)}
+.driver.is-changed{border-color:var(--warn-line);background:#FFFBF6}
+.driver.is-changed small{grid-column:auto}
+.driver .was{font-size:12px;font-weight:500;color:var(--warn-ink)}
+.driver.is-checking .v{color:var(--muted)}
+
+/* Home */
+.home{flex:1;padding:72px 24px 48px}
+.home-inner{max-width:780px;margin:0 auto;display:flex;flex-direction:column;gap:36px}
+.home h1{margin:0;font-size:32px;line-height:1.2;font-weight:600;letter-spacing:-.015em}
+.home .lede{margin:0;font-size:15px;line-height:1.55;color:var(--ink-4)}
+.home .composer{border-radius:18px;padding:14px;gap:10px}
+.drop{display:flex;align-items:center;gap:14px;width:100%;min-height:72px;padding:14px 16px;border:1.5px dashed var(--line-3);border-radius:var(--r-md);background:var(--chat);text-align:left}
+.drop b{display:block;font-size:14px}
+.drop small{display:block;font-size:12px;color:var(--muted)}
+.ic-box{display:flex;align-items:center;justify-content:center;width:40px;height:40px;border-radius:var(--r);background:var(--accent-soft);color:var(--accent-ink);flex:none}
+.home h2{margin:0;font-size:13px;font-weight:600;color:var(--ink-4)}
+.cards{display:flex;flex-wrap:wrap;gap:12px}
+.card{flex:1 1 320px;display:flex;gap:14px;padding:16px;background:var(--surface);border:1px solid var(--line);border-radius:14px;text-align:left;text-decoration:none;color:var(--ink)}
+.card:hover{border-color:var(--line-3);color:var(--ink)}
+.card b{display:block;font-size:15px;font-weight:600;margin-bottom:4px}
+.card p{margin:0 0 4px;font-size:13px;line-height:1.5;color:var(--ink-4)}
+.card small{font-size:12px;color:var(--muted)}
+.src-chips{display:flex;flex-wrap:wrap;gap:8px}
+.src{display:inline-flex;align-items:center;gap:6px;height:34px;padding:0 12px;border:1px solid var(--line);border-radius:999px;background:var(--surface);font-size:13px}
+.src .i{color:var(--muted)}
+.src.private{border-color:#B9DCD9;background:var(--accent-soft);color:var(--accent-ink);font-weight:500}
+.src.private .i{color:var(--accent-ink)}
+.recent{display:flex;flex-direction:column;gap:6px}
+.recent a,.recent button{display:flex;align-items:center;justify-content:space-between;gap:12px;width:100%;min-height:48px;padding:0 14px;background:var(--surface);border:1px solid var(--line);border-radius:var(--r);text-decoration:none;color:var(--ink);font-size:14px;font-weight:500;text-align:left}
+.recent small{font-size:12px;color:var(--muted);font-weight:400}
+
+/* Trace */
+.trace-wrap{flex:1;padding:32px 24px 48px}
+.trace{max-width:760px;margin:0 auto;background:var(--surface);border:1px solid var(--line);border-radius:var(--r-lg);padding:32px 36px;display:flex;flex-direction:column;gap:26px}
+.trace-top{display:flex;align-items:flex-start;justify-content:space-between;gap:16px}
+.trace h1{margin:6px 0;font-size:26px;line-height:1.25;font-weight:600;letter-spacing:-.01em}
+.trace h2{margin:0;font-size:15px;font-weight:600}
+.sec-head{display:flex;justify-content:space-between;align-items:baseline;gap:12px;flex-wrap:wrap}
+.sec-head small{font-size:12.5px;color:var(--muted)}
+.drv-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:12px}
+.drv{border:1px solid var(--line);border-radius:var(--r-md);padding:14px;display:flex;flex-direction:column;gap:6px}
+.drv.is-changed{border-color:var(--warn-line);background:#FFFBF6}
+.drv-top{display:flex;justify-content:space-between;align-items:center;gap:8px;font-size:13px;color:var(--ink-4)}
+.drv .chip{height:22px;padding:0 8px;font-size:11.5px}
+.drv b{font-family:var(--mono);font-size:24px;font-weight:500}
+.drv p{display:flex;gap:6px;margin:0;font-size:12.5px;line-height:1.45;color:var(--ink-3)}
+.drv p .i{margin-top:2px;color:var(--muted)}
+pre.code{margin:0;padding:16px 18px;background:var(--code-bg);color:var(--code-ink);border-radius:var(--r-md);font-family:var(--mono);font-size:13px;line-height:1.7;overflow-x:auto}
+pre.code .c{color:var(--code-muted)}
+.bars{display:flex;flex-direction:column;gap:8px}
+.bar-row{display:flex;align-items:center;gap:12px;font-size:13px}
+.bar-row > span:first-child{width:72px;color:var(--ink-3)}
+.track{flex:1;height:10px;border-radius:5px;background:var(--sunken);overflow:hidden}
+.track span{display:block;height:10px;background:var(--accent)}
+.bar-row .mono{width:48px;text-align:right;font-size:12.5px}
+.trace-foot{padding-top:18px;border-top:1px solid var(--line);display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:12px}
+.trace-foot > span{display:flex;align-items:center;gap:8px;font-size:12.5px;color:var(--ink-4)}
+
+/* Phone */
+.phone-stage{min-height:100vh;display:flex;align-items:center;justify-content:center;padding:32px 16px 96px;background:#E6EAEF}
+.phone{width:390px;max-width:100%;height:844px;border-radius:44px;border:10px solid #0F172A;background:var(--bg);overflow:hidden;display:flex;flex-direction:column;gap:14px;padding:18px 16px 16px;box-shadow:0 20px 50px rgba(15,23,42,.18)}
+.phone .top{display:flex;align-items:center;justify-content:space-between;gap:8px}
+.phone h1{margin:0;font-size:22px;line-height:1.25;font-weight:600}
+.pcard{background:var(--surface);border:1px solid var(--line);border-radius:var(--r-lg);padding:16px;display:flex;flex-direction:column;gap:14px}
+.pitem{display:flex;gap:12px}
+.pitem .ic{display:flex;align-items:center;justify-content:center;width:32px;height:32px;border-radius:50%;flex:none}
+.pitem p{margin:0;font-size:14px}
+.pitem small{display:block;font-size:12px;color:var(--muted)}
+.pask{margin-top:auto;display:flex;align-items:center;gap:8px;padding:6px 6px 6px 16px;background:var(--surface);border:1px solid var(--line-2);border-radius:999px}
+.pask input{flex:1;min-width:0;height:var(--tap);border:0;outline:none;background:transparent;font-size:15px}
+
+/* Mockup screen switcher (review aid, not product UI) */
+.numpop{position:absolute;z-index:20;width:240px;padding:10px 12px;background:var(--surface);border:1px solid var(--line-3);border-radius:var(--r);box-shadow:0 6px 20px rgba(15,23,42,.14);font-size:12px;color:var(--ink-3)}
+.numpop[hidden]{display:none}
+.numpop b{display:block;font-size:13px;color:var(--ink);margin-bottom:2px}
+.numpop code{display:block;font-family:var(--mono);font-size:11.5px;color:var(--muted);margin-bottom:6px}
+.numpop a{display:inline-flex;align-items:center;min-height:var(--tap);color:var(--accent-ink);font-weight:500}
+.drawer-scrim{position:fixed;inset:0;z-index:30;background:rgba(15,23,42,.35)}
+.drawer{position:fixed;top:0;right:0;bottom:0;z-index:31;width:min(400px,100%);background:var(--surface);border-left:1px solid var(--line-3);box-shadow:0 6px 20px rgba(15,23,42,.14);padding:22px;overflow-y:auto}
+.drawer-head{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:14px}
+.drawer h2{margin:0;font-size:16px}
+.drawer p{margin:0 0 14px;font-size:13px;color:var(--ink-4)}
+.drawer table{width:100%;border-collapse:collapse;font-size:13px}
+.drawer th{text-align:left;font-size:11.5px;font-weight:500;color:var(--muted);padding:6px 0;border-bottom:1px solid var(--line)}
+.drawer td{padding:10px 0;border-bottom:1px solid var(--line)}
+.drawer th:not(:first-child),.drawer td:not(:first-child){text-align:right;font-family:var(--mono)}
+.screens{position:fixed;right:16px;bottom:16px;z-index:10;display:flex;gap:4px;padding:4px;background:rgba(15,23,42,.92);border-radius:999px;box-shadow:0 6px 20px rgba(15,23,42,.25)}
+.screens a{display:inline-flex;align-items:center;min-height:36px;padding:0 12px;border-radius:999px;color:#CBD5E1;text-decoration:none;font-size:12.5px;font-weight:500}
+.screens a:hover{color:#fff}
+.screens a[aria-current="page"]{background:#fff;color:var(--ink)}
+</style>
+</head>
+<body>
+
+<!-- Icon sprite -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+  <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></symbol>
+  <symbol id="i-down" viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></symbol>
+  <symbol id="i-up" viewBox="0 0 24 24"><path d="M6 15l6-6 6 6"/></symbol>
+  <symbol id="i-right" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></symbol>
+  <symbol id="i-file" viewBox="0 0 24 24"><path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><path d="M14 3v6h6"/></symbol>
+  <symbol id="i-globe" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"/></symbol>
+  <symbol id="i-chip" viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="2"/><path d="M9 2v4M15 2v4M9 18v4M15 18v4M2 9h4M2 15h4M18 9h4M18 15h4"/></symbol>
+  <symbol id="i-lock" viewBox="0 0 24 24"><rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></symbol>
+  <symbol id="i-share" viewBox="0 0 24 24"><path d="M4 12v7a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-7M12 3v13M7 8l5-5 5 5"/></symbol>
+  <symbol id="i-check" viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7.5"/></symbol>
+  <symbol id="i-alert" viewBox="0 0 24 24"><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/><path d="M12 9v4M12 17h.01"/></symbol>
+  <symbol id="i-bang" viewBox="0 0 24 24"><path d="M12 6v8M12 18h.01"/></symbol>
+  <symbol id="i-attach" viewBox="0 0 24 24"><path d="M21 11.5 12.5 20a5 5 0 0 1-7-7L14 4.5a3.5 3.5 0 0 1 5 5L10.5 18a2 2 0 0 1-3-3L15 7.5"/></symbol>
+  <symbol id="i-at" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M16 8v5a3 3 0 0 0 6 0v-1a10 10 0 1 0-4 8"/></symbol>
+  <symbol id="i-send" viewBox="0 0 24 24"><path d="M12 19V5M5 12l7-7 7 7"/></symbol>
+  <symbol id="i-download" viewBox="0 0 24 24"><path d="M12 4v11M7 10l5 5 5-5M5 20h14"/></symbol>
+  <symbol id="i-x" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></symbol>
+  <symbol id="i-replay" viewBox="0 0 24 24"><path d="M4 4v6h6"/><path d="M20 12a8 8 0 0 1-14.5 4.6M4 12A8 8 0 0 1 18.5 7.4"/></symbol>
+  <symbol id="i-trend" viewBox="0 0 24 24"><path d="M3 20h18M5 16l5-5 4 3 6-7"/></symbol>
+  <symbol id="i-down-trend" viewBox="0 0 24 24"><path d="M3 6l6 6 4-4 8 8M21 10v6h-6"/></symbol>
+  <symbol id="i-rank" viewBox="0 0 24 24"><path d="M4 6h16M4 12h10M4 18h6"/></symbol>
+  <symbol id="i-target" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="4"/></symbol>
+  <symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></symbol>
+  <symbol id="i-upload" viewBox="0 0 24 24"><path d="M12 16V4M7 9l5-5 5 5M4 16v3a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-3"/></symbol>
+</svg>
+
+<div class="app" id="app">
+
+  <!-- ===== Sidebar ===== -->
+  <div class="sidebar">
+    <div class="brand">
+      <svg class="mark" width="22" height="22" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2.5 20 19H4z" fill="#0B6E6E"/><path d="M3 21.5h18" fill="none" stroke="#0F172A" stroke-width="2" stroke-linecap="round"/></svg>
+      Vela
+    </div>
+    <button type="button" class="ws-switch">
+      <span><b>Northbridge Bio</b><small>Client workspace · isolated</small></span>
+      <svg class="i"><use href="#i-down"/></svg>
+    </button>
+    <a class="btn btn-primary" href="#home"><svg class="i"><use href="#i-plus"/></svg>New analysis</a>
+    <div class="search">
+      <label for="search" class="sr">Search engagements</label>
+      <svg class="i" aria-hidden="true"><use href="#i-search"/></svg>
+      <input id="search" type="search" placeholder="Search">
+      <kbd class="kbd-hint" aria-hidden="true">Ctrl K</kbd>
+    </div>
+    <div class="nav-group">
+      <div class="label">Engagements</div>
+      <a class="nav-item" href="#workspace" data-nav="workspace">NB-201 · US launch forecast</a>
+      <button type="button" class="nav-item">BD screen · oral immunology</button>
+      <button type="button" class="nav-item">Competitive watch · AD pipeline</button>
+      <button type="button" class="nav-item"><span>Weekly market pulse</span><small>Mondays</small></button>
+    </div>
+    <div class="nav-group hide-sm">
+      <div class="label" style="display:flex;justify-content:space-between"><span>Data room</span><span style="font-weight:400">12 files · private</span></div>
+      <div class="list-row"><span><svg class="i"><use href="#i-file"/></svg>Q3_board_deck.pdf</span></div>
+      <div class="list-row"><span><svg class="i"><use href="#i-file"/></svg>claims_extract_2024-26.csv</span></div>
+      <div class="list-row"><span><svg class="i"><use href="#i-file"/></svg>analog_10K_pack (5 files)</span></div>
+      <div class="list-row"><span><svg class="i"><use href="#i-file"/></svg>KOL_interviews.docx</span></div>
+      <button type="button" class="add-files"><svg class="i"><use href="#i-plus"/></svg>Add files</button>
+    </div>
+    <div class="nav-group hide-sm">
+      <div class="label">Public sources</div>
+      <div class="list-row"><span><svg class="i"><use href="#i-globe"/></svg>ClinicalTrials.gov</span><small>6h ago</small></div>
+      <div class="list-row"><span><svg class="i"><use href="#i-globe"/></svg>FDA approvals</span><small>6h ago</small></div>
+      <div class="list-row"><span><svg class="i"><use href="#i-globe"/></svg>SEC EDGAR</span><small>1d ago</small></div>
+    </div>
+    <div class="device">
+      <div class="row label"><svg class="i"><use href="#i-chip"/></svg>This device</div>
+      <div style="font-size:14px;font-weight:600">RTX Spark · 128 GB</div>
+      <div class="row" style="font-size:13px;font-weight:600;color:var(--accent-ink)"><svg class="i"><use href="#i-lock"/></svg><span id="dev-mode">Private mode on</span></div>
+      <div id="dev-note" style="font-size:12px;color:var(--ink-4)">Client data never leaves this machine.</div>
+      <div style="display:flex;justify-content:space-between;font-size:12px;color:var(--ink-4)"><span>Memory in use</span><span class="mono">84 / 110 GB</span></div>
+      <div class="meter"><span></span></div>
+      <div class="mono" style="font-size:11.5px;color:var(--ink-4)">gpt-oss-120b · qwen3.6-35b-a3b · chronos-2</div>
+    </div>
+  </div>
+
+  <div class="content">
+
+    <!-- ===== Home ===== -->
+    <section class="home" id="view-home" aria-labelledby="home-title">
+      <div class="home-inner">
+        <div style="display:flex;flex-direction:column;gap:10px">
+          <h1 id="home-title">What are we forecasting today?</h1>
+          <p class="lede">Drop in a data room or ask about a market. Every answer comes back with its sources, the code behind it, and a backtest.</p>
+        </div>
+        <form class="composer" id="home-composer">
+          <button type="button" class="drop">
+            <span class="ic-box"><svg class="i i-lg"><use href="#i-upload"/></svg></span>
+            <span><b>Drop a data room, deck, or spreadsheet</b><small>PDF, PPTX, XLSX, CSV, DOCX · read on upload, so questions start instantly</small></span>
+          </button>
+          <label for="home-ask" class="sr">Ask Vela</label>
+          <textarea id="home-ask" rows="3" placeholder="Ask about a market, an asset, or a deal…" style="font-size:16px"></textarea>
+          <div class="composer-bar">
+            <div class="row-wrap" style="gap:4px">
+              <button type="button" class="btn btn-ghost btn-icon" aria-label="Attach files"><svg class="i i-lg"><use href="#i-attach"/></svg></button>
+              <button type="button" class="btn btn-ghost"><svg class="i"><use href="#i-at"/></svg>Sources</button>
+              <label for="home-mode" class="sr">Analysis mode</label>
+              <select id="home-mode"><option>Quick forecast</option><option>Deep analysis</option></select>
+            </div>
+            <div class="row-wrap">
+              <span class="on-device"><svg class="i i-sm"><use href="#i-lock"/></svg>On-device</span>
+              <button type="submit" class="btn btn-primary btn-icon btn-round" aria-label="Start analysis"><svg class="i"><use href="#i-send"/></svg></button>
+            </div>
+          </div>
+        </form>
+        <div style="display:flex;flex-direction:column;gap:12px">
+          <h2>Start from a template</h2>
+          <div class="cards">
+            <a class="card" href="#workspace" data-start>
+              <span class="ic-box"><svg class="i i-lg"><use href="#i-trend"/></svg></span>
+              <span><b>Launch forecast</b><p>5-year forecast with a P10–P90 range, backtested on past launches.</p><small>First numbers in seconds · checks continue after</small></span>
+            </a>
+            <button type="button" class="card">
+              <span class="ic-box"><svg class="i i-lg"><use href="#i-rank"/></svg></span>
+              <span><b>Asset screen for BD</b><p>Rank in-licensing candidates by forecast, risk, and fit.</p><small>Deep analysis</small></span>
+            </button>
+            <button type="button" class="card">
+              <span class="ic-box"><svg class="i i-lg"><use href="#i-target"/></svg></span>
+              <span><b>Competitive landscape</b><p>Trials, readouts, and approvals that move your market.</p><small>Quick answer</small></span>
+            </button>
+            <button type="button" class="card">
+              <span class="ic-box"><svg class="i i-lg"><use href="#i-clock"/></svg></span>
+              <span><b>Weekly market pulse</b><p>A Monday report on your markets, with alerts when a driver moves.</p><small>Scheduled · Mondays 7:00 AM</small></span>
+            </button>
+          </div>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:12px">
+          <h2>Sources this workspace can use</h2>
+          <div class="src-chips">
+            <span class="src"><svg class="i i-sm"><use href="#i-globe"/></svg>ClinicalTrials.gov</span>
+            <span class="src"><svg class="i i-sm"><use href="#i-globe"/></svg>FDA approvals</span>
+            <span class="src"><svg class="i i-sm"><use href="#i-globe"/></svg>SEC EDGAR</span>
+            <span class="src"><svg class="i i-sm"><use href="#i-globe"/></svg>Medicare Part D spending</span>
+            <span class="src private"><svg class="i i-sm"><use href="#i-lock"/></svg>Data room · 12 files</span>
+            <button type="button" class="src" style="border-style:dashed;background:transparent;color:var(--accent-ink);font-weight:500"><svg class="i i-sm" style="color:inherit"><use href="#i-plus"/></svg>Connect licensed data</button>
+          </div>
+        </div>
+        <div class="recent">
+          <h2 style="margin-bottom:6px">Recent</h2>
+          <a href="#workspace">NB-201 · US launch forecast<small>2 min ago</small></a>
+          <button type="button">BD screen · oral immunology<small>Yesterday</small></button>
+          <button type="button">Competitive watch · AD pipeline<small>Monday</small></button>
+        </div>
+      </div>
+    </section>
+
+    <!-- ===== Workspace ===== -->
+    <section class="ws" id="view-workspace" hidden>
+      <main class="chat">
+        <div class="chat-head">
+          <div class="row-wrap">
+            <h1>NB-201 · US launch forecast</h1>
+            <span class="chip">Sample data</span>
+          </div>
+          <div class="row-wrap" style="gap:8px">
+            <button type="button" class="btn" id="replay"><svg class="i"><use href="#i-replay"/></svg>Run again</button>
+            <button type="button" class="btn"><svg class="i"><use href="#i-share"/></svg>Share</button>
+          </div>
+        </div>
+        <div class="mode" id="mode">
+          <div class="mode-seg" role="radiogroup" aria-label="Data mode">
+            <button type="button" role="radio" aria-checked="true" data-mode="private"><svg class="i i-sm"><use href="#i-lock"/></svg>Private</button>
+            <button type="button" role="radio" aria-checked="false" data-mode="cloud">Private cloud</button>
+            <button type="button" role="radio" aria-checked="false" data-mode="api">Direct API</button>
+          </div>
+          <p id="mode-note" aria-live="polite">All models run on this device. Nothing leaves this machine.</p>
+        </div>
+
+        <div class="thread">
+          <div class="user-msg">
+            <div class="files" id="user-files">
+              <div class="file"><span class="file-ic" style="background:var(--pdf-bg);color:var(--pdf-ink)"><svg class="i"><use href="#i-file"/></svg></span><span><b>Q3_board_deck.pdf</b><small>PDF · 48 pages</small></span></div>
+              <div class="file"><span class="file-ic" style="background:var(--accent-soft);color:var(--accent-ink)"><svg class="i"><use href="#i-file"/></svg></span><span><b>claims_extract_2024-26.csv</b><small>CSV · 36 months</small></span></div>
+            </div>
+            <div class="bubble" id="user-text">Build a 5-year US forecast for NB-201 from our deck assumptions, then stress-test them against analog launches.</div>
+          </div>
+
+          <div class="agent">
+            <div class="agent-head">
+              <svg class="mark" id="agent-mark" width="22" height="22" viewBox="0 0 24 24" aria-hidden="true"><path class="sail" d="M12 2.5 20 19H4z" fill="#0B6E6E"/><path d="M3 21.5h18" fill="none" stroke="#0F172A" stroke-width="2" stroke-linecap="round"/></svg>
+              <b>Vela</b><small id="agent-mode">Quick forecast, then checks</small>
+            </div>
+
+            <div class="run" id="run">
+              <div class="run-head">
+                <span class="run-status"><span class="run-glyph" id="run-glyph" aria-hidden="true"></span><span id="run-text">Working</span><span aria-hidden="true">·</span><span class="mono" id="run-timer" style="font-weight:500">0:00</span></span>
+                <button type="button" class="btn btn-ghost" id="toggle-steps" aria-expanded="true" aria-controls="steps"><span id="toggle-label">Hide steps</span><svg class="i" id="toggle-chev"><use href="#i-up"/></svg></button>
+              </div>
+              <div class="progress" id="progress" role="progressbar" aria-label="Run progress" aria-valuemin="0" aria-valuemax="5" aria-valuenow="0"><i></i><i></i><i></i><i></i><i></i></div>
+              <ol class="steps" id="steps"></ol>
+            </div>
+            <p class="sr" id="run-live" aria-live="polite"></p>
+
+            <div class="answer" id="answer" aria-live="polite"></div>
+          </div>
+        </div>
+
+        <div class="composer-wrap">
+          <form class="composer" id="composer">
+            <label for="msg" class="sr">Message</label>
+            <div class="files att" id="att" hidden></div>
+            <textarea id="msg" rows="2"placeholder="Ask a follow-up, drop files, or @ a source…"></textarea>
+            <div class="composer-bar">
+              <div class="row-wrap" style="gap:4px">
+                <button type="button" class="btn btn-ghost btn-icon" id="attach-btn" aria-label="Attach files"><svg class="i i-lg"><use href="#i-attach"/></svg></button>
+                <button type="button" class="btn btn-ghost"><svg class="i"><use href="#i-at"/></svg>Sources</button>
+                <label for="mode" class="sr">Analysis mode</label>
+                <select id="mode"><option>Quick forecast</option><option>Deep analysis</option></select>
+              </div>
+              <div class="row-wrap">
+                <span class="on-device"><svg class="i i-sm"><use href="#i-lock"/></svg>On-device</span>
+                <button type="submit" class="btn btn-primary btn-icon btn-round" aria-label="Send"><svg class="i"><use href="#i-send"/></svg></button>
+              </div>
+            </div>
+          </form>
+          <div class="fineprint">Client files stay on this device. Public sources are fetched read-only.</div>
+        </div>
+      </main>
+
+      <aside class="panel" id="model-panel" aria-label="Forecast model">
+        <button type="button" class="btn panel-toggle" id="panel-toggle" aria-expanded="false" aria-controls="model-panel"><span id="panel-toggle-label">View model</span></button>
+        <div class="panel-head"><h2>NB-201 model</h2><span style="font-size:12px;color:var(--muted)" id="model-ver">v3 · updating…</span></div>
+        <div class="tabs" id="tabs">
+          <button type="button" aria-pressed="true" data-tab="model">Model</button>
+          <button type="button" aria-pressed="false" data-tab="memo">Memo draft</button>
+          <button type="button" aria-pressed="false" data-tab="files">Files</button>
+        </div>
+
+        <div id="tab-model" style="display:flex;flex-direction:column;gap:18px">
+          <div style="display:flex;flex-direction:column;gap:8px">
+            <div class="label">Scenario</div>
+            <div class="scen" id="scen">
+              <button type="button" aria-pressed="true" data-scen="base">Critic-adjusted</button>
+              <button type="button" aria-pressed="false" data-scen="deck">Deck case</button>
+              <button type="button" aria-pressed="false" data-scen="bear">Bear case</button>
+            </div>
+          </div>
+
+          <figure class="chart" id="chart" data-state="pending" data-scenario="base">
+            <span class="chart-skel skel"></span>
+            <div class="chart-note"><span class="spin"></span>Preliminary · the range appears after the backtest</div>
+            <svg viewBox="0 0 360 216" role="img" aria-label="US net sales forecast, 2027 to 2031. Critic-adjusted base case rises to 1.42 billion dollars, P10 to P90 range 0.91 to 1.88 billion. Deck case rises to 2.33 billion.">
+              <line class="grid" x1="44" y1="190" x2="352" y2="190"/>
+              <line class="grid" x1="44" y1="155.2" x2="352" y2="155.2"/>
+              <line class="grid" x1="44" y1="120.4" x2="352" y2="120.4"/>
+              <line class="grid" x1="44" y1="85.6" x2="352" y2="85.6"/>
+              <line class="grid" x1="44" y1="50.8" x2="352" y2="50.8"/>
+              <line class="grid" x1="44" y1="16" x2="352" y2="16"/>
+              <text class="ax end" x="38" y="194">$0</text>
+              <text class="ax end" x="38" y="159">$0.5B</text>
+              <text class="ax end" x="38" y="124">$1.0B</text>
+              <text class="ax end" x="38" y="89">$1.5B</text>
+              <text class="ax end" x="38" y="54">$2.0B</text>
+              <text class="ax end" x="38" y="20">$2.5B</text>
+              <polygon class="band" points="48,180.3 122,157.3 196,124.6 270,90.5 344,59.2 344,126.7 270,142.7 196,160.8 122,176.8 48,186.5"/>
+              <polyline class="deck" points="48,180.3 122,151 196,109.3 270,66.8 344,27.8"/>
+              <polyline class="bear" points="48,186.5 122,176.8 196,160.8 270,142.7 344,126.7"/>
+              <polyline class="p50" points="48,183.7 122,167 196,142.7 270,116.9 344,91.2"/>
+              <circle cx="344" cy="91.2" r="3.5" fill="#0B6E6E"/>
+              <circle cx="344" cy="27.8" r="3" fill="#64748B"/>
+              <text class="ax mid" x="48" y="208">2027</text>
+              <text class="ax mid" x="122" y="208">2028</text>
+              <text class="ax mid" x="196" y="208">2029</text>
+              <text class="ax mid" x="270" y="208">2030</text>
+              <text class="ax mid" x="344" y="208">2031</text>
+            </svg>
+            <figcaption class="legend">
+              <span><span class="sw" style="height:3px;border-radius:2px;background:var(--accent)"></span>Base (P50)</span>
+              <span><span class="sw" style="height:10px;border-radius:2px;background:var(--accent-band)"></span>P10–P90 range</span>
+              <span><span class="sw" style="border-top:2px dashed var(--slate-line)"></span>Deck case</span>
+            </figcaption>
+          </figure>
+
+          <div class="tiles">
+            <div class="tile" id="t-peak"><small>Peak sales</small><b>…</b><em>2031 · P50</em></div>
+            <div class="tile" id="t-vs"><small>vs. deck</small><b>…</b><em>Deck: $2.33B</em></div>
+            <div class="tile" id="t-bt"><small>Backtest error</small><b>…</b><em>Median, 6 launches</em></div>
+          </div>
+
+          <div class="changed" id="changed" aria-live="polite">
+            <b>What changed after the critic's check</b>
+            <span>Peak share 18% → 11%</span>
+            <span>Peak sales $2.33B → $1.42B</span>
+          </div>
+
+          <div class="drivers">
+            <div style="display:flex;justify-content:space-between;align-items:baseline"><span class="label">Drivers</span><span style="font-size:12px;color:var(--muted)" id="drivers-note">Tracing sources…</span></div>
+            <a class="driver" href="#trace"><b>Eligible patients</b><span class="v">620K</span><small>claims_extract_2024-26.csv</small></a>
+            <a class="driver is-checking" href="#trace" id="d-share"><b>Peak share</b><span class="v">18%</span><small>From deck · checking against analogs</small><span class="was" hidden>was 18%</span></a>
+            <a class="driver" href="#trace"><b>12-month persistence</b><span class="v">64%</span><small>claims_extract_2024-26.csv</small></a>
+            <a class="driver" href="#trace"><b>Net price per year</b><span class="v">$32.6K</span><small>Analog 10-Ks · 38% gross-to-net</small></a>
+          </div>
+
+          <div style="display:flex;flex-direction:column;gap:8px">
+            <div class="label">Export</div>
+            <div class="row-wrap" style="gap:8px">
+              <button type="button" class="btn"><svg class="i"><use href="#i-download"/></svg>Board memo</button>
+              <button type="button" class="btn"><svg class="i"><use href="#i-download"/></svg>Deck</button>
+              <button type="button" class="btn"><svg class="i"><use href="#i-download"/></svg>Excel model</button>
+            </div>
+            <div style="font-size:12px;color:var(--muted)">Every export carries the source log, so each number stays traceable.</div>
+          </div>
+        </div>
+
+        <div id="tab-memo" hidden style="display:flex;flex-direction:column;gap:10px">
+          <p style="margin:0;font-size:14px;color:var(--ink-4)">The memo drafts itself from the finished analysis. Edit any line; changes to numbers re-run the trace.</p>
+          <span class="skel" style="width:90%"></span><span class="skel" style="width:75%"></span><span class="skel" style="width:82%"></span>
+        </div>
+        <div id="tab-files" hidden style="display:flex;flex-direction:column;gap:6px">
+          <div class="list-row"><span><svg class="i"><use href="#i-file"/></svg>Q3_board_deck.pdf</span><small>48 pages</small></div>
+          <div class="list-row"><span><svg class="i"><use href="#i-file"/></svg>claims_extract_2024-26.csv</span><small>36 months</small></div>
+          <div class="list-row"><span><svg class="i"><use href="#i-file"/></svg>drivers.py</span><small>generated</small></div>
+        </div>
+      </aside>
+    </section>
+
+    <!-- ===== Trace ===== -->
+    <section class="trace-wrap" id="view-trace" hidden>
+      <article class="trace">
+        <div class="trace-top">
+          <div>
+            <span class="chip chip-accent" style="font-weight:600">Number trace</span>
+            <h1><span class="mono" style="font-weight:500">$1.42B</span> peak US net sales, 2031</h1>
+            <span style="font-size:13px;color:var(--muted)">Critic-adjusted base case · NB-201 model v3 · sample data</span>
+          </div>
+          <a class="btn btn-icon" href="#workspace" aria-label="Back to the analysis"><svg class="i"><use href="#i-x"/></svg></a>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:12px">
+          <div class="sec-head"><h2>How it is built</h2><small>patients × share × persistence × net price</small></div>
+          <div class="drv-grid">
+            <div class="drv"><div class="drv-top">Eligible patients<span class="chip chip-accent">Within 4% of deck</span></div><b>620K</b><p><svg class="i i-sm"><use href="#i-file"/></svg>claims_extract_2024-26.csv: adults with moderate-to-severe disease and at least one systemic prescription</p></div>
+            <div class="drv is-changed"><div class="drv-top">Peak share<span class="chip chip-warn">Changed · was 18%</span></div><b>11%</b><p><svg class="i i-sm"><use href="#i-globe"/></svg>Median of 5 analog oral launches in immunology, range 7–12%, from their 10-K filings</p></div>
+            <div class="drv"><div class="drv-top">12-month persistence<span class="chip">Matches deck</span></div><b>64%</b><p><svg class="i i-sm"><use href="#i-file"/></svg>claims_extract_2024-26.csv: share of the 36-month cohort still on therapy at month 12</p></div>
+            <div class="drv"><div class="drv-top">Net price per year<span class="chip">Matches deck</span></div><b>$32.6K</b><p><svg class="i i-sm"><use href="#i-globe"/></svg>List price $52.6K less 38% gross-to-net, the analog median from 10-K revenue notes</p></div>
+          </div>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:10px">
+          <div class="sec-head"><h2>The calculation</h2><small>drivers.py, line 88 · ran on this device</small></div>
+<pre class="code">peak_net = eligible * peak_share * persistence * net_price
+         = 620_000  * 0.11       * 0.64        * 32_600
+         = 1_422_924_800   <span class="c"># ≈ $1.42B</span></pre>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:12px">
+          <div style="display:flex;flex-direction:column;gap:4px">
+            <h2>How much to trust it</h2>
+            <p style="margin:0;font-size:13.5px;line-height:1.55;color:var(--ink-4)">The same method, replayed on 6 past launches using only data available before each launch. Error is the Year-3 forecast vs. reported sales.</p>
+          </div>
+          <div class="bars">
+            <div class="bar-row"><span>Launch A</span><span class="track"><span style="width:45%"></span></span><span class="mono">+10%</span></div>
+            <div class="bar-row"><span>Launch B</span><span class="track"><span style="width:59%"></span></span><span class="mono">−13%</span></div>
+            <div class="bar-row"><span>Launch C</span><span class="track"><span style="width:100%"></span></span><span class="mono">+22%</span></div>
+            <div class="bar-row"><span>Launch D</span><span class="track"><span style="width:27%"></span></span><span class="mono">−6%</span></div>
+            <div class="bar-row"><span>Launch E</span><span class="track"><span style="width:68%"></span></span><span class="mono">+15%</span></div>
+            <div class="bar-row"><span>Launch F</span><span class="track"><span style="width:82%"></span></span><span class="mono">−18%</span></div>
+          </div>
+          <div style="font-size:14px"><strong>Median error: 14%.</strong> <span style="color:var(--ink-4)">Positive means the forecast ran high.</span></div>
+        </div>
+        <div class="trace-foot">
+          <span><svg class="i" style="color:var(--accent-ink)"><use href="#i-check"/></svg>Checked by Critic · 31 of 31 numbers traced · log v3 travels with every export</span>
+          <div class="row-wrap" style="gap:8px">
+            <button type="button" class="btn">Copy citation</button>
+            <a class="btn btn-primary" href="#workspace">Back to analysis</a>
+          </div>
+        </div>
+      </article>
+    </section>
+  </div>
+</div>
+
+<!-- ===== Phone ===== -->
+<section class="phone-stage" id="view-phone" hidden aria-label="Phone view">
+  <div class="phone">
+    <div class="top">
+      <div class="brand" style="padding:0;font-size:17px"><svg width="22" height="22" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2.5 20 19H4z" fill="#0B6E6E"/><path d="M3 21.5h18" fill="none" stroke="#0F172A" stroke-width="2" stroke-linecap="round"/></svg>Vela</div>
+      <button type="button" class="btn pill" style="font-size:13px">Northbridge Bio<svg class="i i-sm"><use href="#i-down"/></svg></button>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:2px;padding:4px 2px 0">
+      <span style="font-size:13px;color:var(--muted)">Monday, October 26</span>
+      <h1>Your weekly pulse</h1>
+    </div>
+    <div class="pcard">
+      <div style="display:flex;justify-content:space-between;align-items:baseline"><b style="font-size:14px">NB-201 market</b><small style="font-size:12px;color:var(--muted)">7:02 AM</small></div>
+      <div class="pitem"><span class="ic" style="background:var(--accent-soft);color:var(--accent-ink)"><svg class="i"><use href="#i-globe"/></svg></span><p>2 new Phase 3 trials started in your indication<small>ClinicalTrials.gov</small></p></div>
+      <div class="pitem"><span class="ic" style="background:var(--warn-soft);color:var(--warn-ink)"><svg class="i"><use href="#i-down-trend"/></svg></span><p>A rival’s readout moved up to Q2 2027. Base-case peak: <span class="mono">$1.42B → $1.34B</span><small>Company 8-K · SEC EDGAR</small></p></div>
+      <div class="pitem"><span class="ic" style="background:var(--accent-soft);color:var(--accent-ink)"><svg class="i"><use href="#i-check"/></svg></span><p>Every other driver is unchanged since v3<small>Critic</small></p></div>
+    </div>
+    <div class="callout" style="border-radius:var(--r-lg)">
+      <h3><svg class="i"><use href="#i-alert"/></svg>Decision needed</h3>
+      <p style="margin:0">The board deck still shows 18% peak share. Switch it to 11% before Thursday’s meeting?</p>
+      <div style="display:flex;gap:8px">
+        <button type="button" class="btn btn-dark" style="flex:1">Switch to 11%</button>
+        <button type="button" class="btn btn-outline-warn" style="flex:1">Keep 18%</button>
+      </div>
+    </div>
+    <a class="btn" href="#workspace" style="color:var(--accent-ink)">Open the full report<svg class="i"><use href="#i-right"/></svg></a>
+    <form class="pask" onsubmit="return false">
+      <label for="p-ask" class="sr">Ask a follow-up</label>
+      <input id="p-ask" type="text" placeholder="Ask a follow-up…">
+      <button type="submit" class="btn btn-primary btn-icon btn-round" aria-label="Send"><svg class="i"><use href="#i-send"/></svg></button>
+    </form>
+  </div>
+</section>
+
+<!-- Review aid: jump between mockup screens -->
+<nav class="screens" aria-label="Mockup screens">
+  <a href="#home">Home</a>
+  <a href="#workspace">Workspace</a>
+  <a href="#trace">Trace</a>
+  <a href="#phone">Phone</a>
+</nav>
+
+<!-- Answer states -->
+<template id="tpl-thinking">
+  <div class="thinking" aria-label="Working">
+    <span class="skel" style="width:92%"></span>
+    <span class="skel" style="width:78%"></span>
+    <span class="skel" style="width:85%"></span>
+  </div>
+</template>
+
+<template id="tpl-prelim">
+  <div class="prelim">
+    <span class="chip chip-accent" style="align-self:flex-start"><span class="spin" style="width:12px;height:12px"></span>Checking assumptions</span>
+    <p><strong>Early read: about $1.4B peak US net sales in 2031.</strong> The critic is testing each assumption against analog launches, so this number may still move.</p>
+  </div>
+</template>
+
+<template id="tpl-final">
+  <span class="chip chip-accent verified"><svg class="i i-sm"><use href="#i-check"/></svg>Verified · 31 of 31 numbers traced</span>
+  <p><strong>Base case: <a class="num" href="#trace" data-src="Peak sales 2031, P50|forecast_model.py · 3 methods ensembled">$1.42B</a> peak US net sales in 2031</strong> (P10–P90: $0.91B–$1.88B). That is 39% below the deck’s $2.33B.</p>
+  <p>Almost all of the gap comes from one assumption.</p>
+  <div class="callout">
+    <h3><svg class="i"><use href="#i-alert"/></svg>Critic: peak share looks high</h3>
+    <p>The deck assumes <a class="num" href="#trace" data-src="Peak share in deck|Q3_board_deck.pdf · p. 31">18% peak share</a>. Five oral launches in immunology peaked between <a class="num" href="#trace" data-src="Analog peak share range|analog_10K_pack · Launch A–E">7% and 12%</a>. I used 11%, the analog median.</p>
+    <div class="row-wrap" style="gap:8px" data-decision>
+      <button type="button" class="btn btn-dark" data-decide="11%">Use 11% (analogs)</button>
+      <button type="button" class="btn btn-outline-warn" data-decide="18%">Keep 18% (deck)</button>
+      <button type="button" class="btn-link" data-open-analogs aria-haspopup="dialog" style="min-height:44px;font-size:13.5px;font-weight:500">See the 5 analogs</button>
+    </div>
+  </div>
+  <p>Everything else held up. Eligible patients in your claims extract came within 4% of the deck, and net price lines up with gross-to-net on the analogs. Click any underlined number to see where it came from.</p>
+  <div class="suggest">
+    <button type="button" class="btn" data-ask="Model a 6-month launch delay">Model a 6-month launch delay</button>
+    <button type="button" class="btn" data-ask="Add a biologic rival entering in 2029">Add a biologic rival in 2029</button>
+    <button type="button" class="btn" data-ask="Draft the board memo">Draft the board memo</button>
+  </div>
+</template>
+
+<template id="tpl-failed">
+  <div class="callout" role="alert">
+    <h3><svg class="i"><use href="#i-bang"/></svg>Data stopped on one file</h3>
+    <p>KOL_interview_notes.pdf is password-protected, so its pages could not be read. Your deck and claims extract are loaded, and no other step has run yet. Unlock the file and retry, or retry now to continue without it.</p>
+    <div class="row-wrap" style="gap:8px">
+      <button type="button" class="btn btn-outline-warn" data-retry>Retry this step</button>
+    </div>
+  </div>
+</template>
+
+<div class="drawer-scrim" id="analog-scrim" hidden></div>
+<aside class="drawer" id="analog-drawer" role="dialog" aria-modal="true" aria-labelledby="analog-title" hidden>
+  <div class="drawer-head"><h2 id="analog-title">5 analog launches</h2><button type="button" class="btn btn-icon" id="analog-close" aria-label="Close analogs"><svg class="i"><use href="#i-x"/></svg></button></div>
+  <p>Oral immunology launches from analog_10K_pack. Median peak share is 11%, the value used in the model.</p>
+  <table><thead><tr><th scope="col">Analog</th><th scope="col">Peak share</th><th scope="col">Years to peak</th></tr></thead><tbody>
+    <tr><td>Launch A</td><td>12%</td><td>4</td></tr>
+    <tr><td>Launch B</td><td>11%</td><td>5</td></tr>
+    <tr><td>Launch C</td><td>7%</td><td>3</td></tr>
+    <tr><td>Launch D</td><td>9%</td><td>4</td></tr>
+    <tr><td>Launch E</td><td>11%</td><td>5</td></tr>
+  </tbody></table>
+</aside>
+
+<script>
+(function () {
+  'use strict';
+  var $ = function (s, r) { return (r || document).querySelector(s); };
+  var $$ = function (s, r) { return Array.prototype.slice.call((r || document).querySelectorAll(s)); };
+  var sleep = function (ms) { return new Promise(function (res) { setTimeout(res, ms); }); };
+
+  /* ---------- Sample run (all data is fictional) ---------- */
+  var DEFAULT_Q = 'Build a 5-year US forecast for NB-201 from our deck assumptions, then stress-test them against analog launches.';
+  var STEPS = [
+    { id: 'data', name: 'Data', running: 'Loading your 2 files', done: 'Loaded the deck and claims (parsed on upload)', dur: 900,
+      logs: ['Q3_board_deck.pdf: 48 pages, parsed when uploaded', 'Found 14 assumption tables (pages 9–22)', 'claims_extract_2024-26.csv: 36 months loaded'] },
+    { id: 'analyst', name: 'Analyst', running: 'Building the patient funnel in code', done: 'Built the patient funnel in code', dur: 1100,
+      logs: ['Wrote drivers.py (88 lines)', 'Eligible patients: 620K in claims vs. 642K in deck', 'Net price $32.6K after 38% gross-to-net'] },
+    { id: 'forecaster', name: 'Forecaster', running: 'Running 3 forecast methods', done: 'Ran 3 methods; early read is ready', dur: 900,
+      logs: ['Chronos-2 on 36 monthly points: 6 ms', 'Matched 5 analog oral launches in immunology', 'Preliminary peak: about $1.4B in 2031'],
+      after: function () { setAnswer('tpl-prelim'); setChart('prelim'); setTiles('prelim'); } },
+    { id: 'critic', name: 'Critic', running: 'Backtesting and tracing every number', done: 'Traced all 31 numbers, flagged 1 assumption', dur: 3000, flag: true,
+      logs: ['Replayed the method on 6 past launches: median error 14%', 'Traced 31 of 31 numbers to a source', 'Flag: deck peak share 18% vs. analog range 7–12%', 'Adjusted to 11% (analog median); peak is now $1.42B'],
+      after: function () { setChart('final'); setTiles('final'); setShare('final'); } },
+    { id: 'writer', name: 'Writer', running: 'Writing the summary', done: 'Drafted this summary', dur: 1000,
+      logs: ['Drafted 3 paragraphs', 'Linked every number to its trace'],
+      after: function () { setAnswer('tpl-final'); } }
+  ];
+
+  var runId = 0, timer = null, t0 = 0, hasRun = false, pendingQ = null;
+  var fmtClock = function (ms) { var s = Math.floor(ms / 1000); return Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0'); };
+  var fmtSec = function (ms) { return (ms / 1000).toFixed(1) + 's'; };
+
+  var ICONS = {
+    queued: '<span class="dot"></span>',
+    running: '<span class="spin"></span>',
+    done: '<svg class="i i-sm"><use href="#i-check"/></svg>',
+    flag: '<svg class="i i-sm"><use href="#i-bang"/></svg>',
+    fail: '<svg class="i i-sm"><use href="#i-x"/></svg>'
+  };
+  var FAIL_LOGS = ['Q3_board_deck.pdf: 48 pages, parsed when uploaded', 'KOL_interview_notes.pdf: password-protected, cannot read pages'];
+  var FAIL_SUM = 'Could not read KOL_interview_notes.pdf';
+
+  function renderSteps() {
+    var ol = $('#steps');
+    ol.innerHTML = '';
+    STEPS.forEach(function (st) {
+      var li = document.createElement('li');
+      li.className = 'step';
+      li.id = 'step-' + st.id;
+      li.dataset.status = 'queued';
+      li.innerHTML =
+        '<button type="button" class="step-head" aria-expanded="false" aria-controls="log-' + st.id + '">' +
+          '<span class="step-icon" aria-hidden="true">' + ICONS.queued + '</span>' +
+          '<span class="step-name"></span><span class="step-sum">Queued</span>' +
+          '<span class="step-time mono"></span>' +
+          '<svg class="i chev" aria-hidden="true"><use href="#i-down"/></svg>' +
+        '</button>' +
+        '<div class="step-log" id="log-' + st.id + '" hidden><ul><li class="empty">Waiting to start</li></ul></div>';
+      li.querySelector('.step-name').textContent = st.name;
+      li.querySelector('.step-head').addEventListener('click', function (e) {
+        var b = e.currentTarget, open = b.getAttribute('aria-expanded') === 'true';
+        b.setAttribute('aria-expanded', String(!open));
+        li.querySelector('.step-log').hidden = open;
+      });
+      ol.appendChild(li);
+    });
+  }
+
+  function setStatus(li, status, text, time) {
+    li.dataset.status = status;
+    li.querySelector('.step-icon').innerHTML = ICONS[status];
+    li.querySelector('.step-sum').textContent = text;
+    li.querySelector('.step-time').textContent = time || '';
+    var p = $('#progress'), bars = p.children, n = 0;
+    for (var k = 0; k < bars.length; k++) {
+      var d = $('#step-' + STEPS[k].id).dataset.status;
+      bars[k].className = d === 'done' ? 'on' : (d === 'flag' || d === 'fail') ? 'flag' : '';
+      if (d === 'done' || d === 'flag') n++;
+    }
+    p.setAttribute('aria-valuenow', n);
+  }
+
+  function setRunHead(state, total) {
+    var glyph = $('#run-glyph'), mark = $('#agent-mark');
+    if (state === 'running') {
+      glyph.innerHTML = '<span class="spin"></span>';
+      $('#run-text').textContent = 'Working';
+      mark.classList.add('is-running');
+      $('#model-ver').textContent = 'v3 · updating…';
+      $('#drivers-note').textContent = 'Tracing sources…';
+    } else {
+      glyph.innerHTML = '<svg class="i" style="color:var(--accent-ink)"><use href="#i-check"/></svg>';
+      $('#run-text').textContent = '5 agents · all on this device';
+      $('#run-timer').textContent = fmtClock(total);
+      mark.classList.remove('is-running');
+      $('#model-ver').textContent = 'v3 · updated just now';
+      $('#drivers-note').textContent = '4 inputs · all traced';
+    }
+  }
+
+  var streamTimers = [];
+  var reduceMotion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  function setAnswer(tplId) {
+    var a = $('#answer');
+    streamTimers.forEach(clearTimeout);
+    streamTimers = [];
+    a.innerHTML = '';
+    var frag = $('#' + tplId).content.cloneNode(true);
+    if (tplId !== 'tpl-final' || reduceMotion) { a.appendChild(frag); return; }
+    Array.prototype.slice.call(frag.children).forEach(function (el, i) {
+      el.classList.add('stream-in');
+      streamTimers.push(setTimeout(function () { a.appendChild(el); }, i * 380));
+    });
+  }
+
+  function setChart(state) {
+    $('#chart').dataset.state = state;
+    $('#changed').classList.toggle('on', state === 'final');
+  }
+
+  function setTile(id, value, isPrelim) {
+    var t = $('#' + id);
+    t.querySelector('b').textContent = value;
+    t.classList.toggle('is-prelim', !!isPrelim);
+  }
+  function setTiles(state) {
+    if (state === 'pending') { setTile('t-peak', '…'); setTile('t-vs', '…'); setTile('t-bt', '…'); }
+    if (state === 'prelim') { setTile('t-peak', '~$1.4B', true); setTile('t-vs', '…'); setTile('t-bt', '…'); }
+    if (state === 'final') { setTile('t-peak', '$1.42B'); setTile('t-vs', '−39%'); setTile('t-bt', '14%'); }
+  }
+
+  function setShare(state) {
+    var d = $('#d-share');
+    if (state === 'pending') {
+      d.className = 'driver is-checking';
+      d.querySelector('.v').textContent = '18%';
+      d.querySelector('small').textContent = 'From deck · checking against analogs';
+      d.querySelector('.was').hidden = true;
+    } else {
+      d.className = 'driver is-changed';
+      d.querySelector('.v').textContent = '11%';
+      d.querySelector('small').textContent = 'Critic · median of 5 analogs';
+      d.querySelector('.was').hidden = false;
+    }
+  }
+
+  async function startRun(question, failData, resume) {
+    hasRun = true;
+    var id = ++runId;
+    if (!resume) {
+      $('#user-text').textContent = question || DEFAULT_Q;
+      renderSteps();
+      setChart('pending');
+      setTiles('pending');
+      setShare('pending');
+      t0 = performance.now();
+      $('#run-timer').textContent = '0:00';
+    }
+    setRunHead('running');
+    setAnswer('tpl-thinking');
+    clearInterval(timer);
+    timer = setInterval(function () { $('#run-timer').textContent = fmtClock(performance.now() - t0); }, 200);
+    document.title = 'Working… · Vela';
+
+    for (var i = 0; i < STEPS.length; i++) {
+      var st = STEPS[i];
+      if (id !== runId) return;
+      var li = $('#step-' + st.id), ul = li.querySelector('ul'), s0 = performance.now();
+      setStatus(li, 'running', st.running);
+      ul.innerHTML = '';
+      var logs = failData && i === 0 ? FAIL_LOGS : st.logs;
+      var gap = st.dur / (logs.length + 1);
+      for (var j = 0; j < logs.length; j++) {
+        await sleep(gap);
+        if (id !== runId) return;
+        var item = document.createElement('li');
+        var t = document.createElement('span'); t.className = 'mono log-t'; t.textContent = fmtSec(performance.now() - t0);
+        var x = document.createElement('span'); x.textContent = logs[j];
+        item.appendChild(t); item.appendChild(x);
+        ul.appendChild(item);
+        li.querySelector('.step-sum').textContent = logs[j];
+      }
+      await sleep(gap);
+      if (id !== runId) return;
+      if (failData && i === 0) {
+        clearInterval(timer);
+        setStatus(li, 'fail', FAIL_SUM, fmtSec(performance.now() - s0));
+        li.querySelector('.step-head').setAttribute('aria-expanded', 'true');
+        li.querySelector('.step-log').hidden = false;
+        $('#run-live').textContent = 'Data: ' + FAIL_SUM;
+        $('#run-glyph').innerHTML = ICONS.fail;
+        $('#run-text').textContent = 'Stopped at Data';
+        $('#agent-mark').classList.remove('is-running');
+        $('#model-ver').textContent = 'v2 · not updated';
+        $('#drivers-note').textContent = 'Waiting on Data';
+        setAnswer('tpl-failed');
+        document.title = 'Needs attention · Vela';
+        return;
+      }
+      setStatus(li, st.flag ? 'flag' : 'done', st.done, fmtSec(performance.now() - s0));
+      $('#run-live').textContent = st.name + ': ' + st.done;
+      if (st.after) st.after();
+    }
+    clearInterval(timer);
+    setRunHead('done', performance.now() - t0);
+    document.title = 'NB-201 forecast · Vela';
+  }
+
+  /* ---------- Interactions ---------- */
+  $('#toggle-steps').addEventListener('click', function (e) {
+    var b = e.currentTarget, open = b.getAttribute('aria-expanded') === 'true';
+    b.setAttribute('aria-expanded', String(!open));
+    $('#steps').hidden = open;
+    $('#toggle-label').textContent = open ? 'Show steps' : 'Hide steps';
+    $('#toggle-chev').innerHTML = open ? '<use href="#i-down"/>' : '<use href="#i-up"/>';
+  });
+
+  $('#replay').addEventListener('click', function () { startRun($('#user-text').textContent); });
+
+  var SAMPLE_FILES = [
+    { name: 'NB-201_pricing_assumptions.xlsx', meta: 'XLSX · 6 sheets', bg: 'var(--accent-soft)', ink: 'var(--accent-ink)' },
+    { name: 'KOL_interview_notes.pdf', meta: 'PDF · 12 pages', bg: 'var(--pdf-bg)', ink: 'var(--pdf-ink)' }
+  ];
+  function fileChip(f) {
+    var d = document.createElement('div');
+    d.className = 'file';
+    d.innerHTML = '<span class="file-ic" style="background:' + f.bg + ';color:' + f.ink + '"><svg class="i"><use href="#i-file"/></svg></span><span><b></b><small></small></span>';
+    d.querySelector('b').textContent = f.name;
+    d.querySelector('small').textContent = f.meta;
+    var b = document.createElement('button');
+    b.type = 'button'; b.className = 'rm'; b.setAttribute('aria-label', 'Remove ' + f.name);
+    b.innerHTML = '<svg class="i i-sm"><use href="#i-x"/></svg>';
+    b.addEventListener('click', function () {
+      d.remove();
+      if (!$('#att').children.length) $('#att').hidden = true;
+      $('#msg').focus();
+    });
+    d.appendChild(b);
+    return d;
+  }
+  $('#attach-btn').addEventListener('click', function () {
+    var att = $('#att');
+    att.innerHTML = '';
+    SAMPLE_FILES.forEach(function (f) { att.appendChild(fileChip(f)); });
+    att.hidden = false;
+  });
+
+  $('#composer').addEventListener('submit', function (e) {
+    e.preventDefault();
+    var v = $('#msg').value.trim();
+    if (!v) return;
+    $('#msg').value = '';
+    var att = $('#att'), uf = $('#user-files');
+    uf.querySelectorAll('.file.sent').forEach(function (n) { n.remove(); });
+    Array.prototype.slice.call(att.querySelectorAll('.file')).forEach(function (c) {
+      c.querySelector('.rm').remove();
+      c.classList.add('sent');
+      uf.appendChild(c);
+    });
+    att.hidden = true;
+    startRun(v, uf.querySelector('.file.sent') !== null);
+  });
+  $('#msg').addEventListener('keydown', function (e) {
+    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); $('#composer').requestSubmit(); }
+  });
+
+  function goRun(q) {
+    pendingQ = q || DEFAULT_Q;
+    if (location.hash === '#workspace') route(); else location.hash = '#workspace';
+  }
+  $('#home-composer').addEventListener('submit', function (e) {
+    e.preventDefault();
+    var v = $('#home-ask').value.trim();
+    $('#home-ask').value = '';
+    goRun(v);
+  });
+  $('#home-ask').addEventListener('keydown', function (e) {
+    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); $('#home-composer').requestSubmit(); }
+  });
+  $$('[data-start]').forEach(function (a) {
+    a.addEventListener('click', function (e) { e.preventDefault(); goRun(); });
+  });
+
+  $('#answer').addEventListener('click', function (e) {
+    var ask = e.target.closest('[data-ask]');
+    if (ask) { startRun(ask.dataset.ask); return; }
+    if (e.target.closest('[data-retry]')) { startRun(null, false, true); return; }
+    var dec = e.target.closest('[data-decide]');
+    if (dec) {
+      var row = dec.closest('[data-decision]');
+      row.innerHTML = '';
+      var note = document.createElement('span');
+      note.className = 'decided';
+      note.innerHTML = '<svg class="i"><use href="#i-check"/></svg>';
+      note.appendChild(document.createTextNode(dec.dataset.decide === '11%' ? 'Using 11%. Logged as your decision.' : 'Keeping the deck’s 18%. Logged as your decision; the deck case is now the base.'));
+      row.appendChild(note);
+      setScenario(dec.dataset.decide === '11%' ? 'base' : 'deck');
+    }
+  });
+
+  function setScenario(s) {
+    $('#chart').dataset.scenario = s;
+    $$('#scen button').forEach(function (b) { b.setAttribute('aria-pressed', String(b.dataset.scen === s)); });
+  }
+  $$('#scen button').forEach(function (b) { b.addEventListener('click', function () { setScenario(b.dataset.scen); }); });
+
+  $$('#tabs button').forEach(function (b) {
+    b.addEventListener('click', function () {
+      $$('#tabs button').forEach(function (x) { x.setAttribute('aria-pressed', String(x === b)); });
+      ['model', 'memo', 'files'].forEach(function (t) { $('#tab-' + t).hidden = t !== b.dataset.tab; });
+    });
+  });
+
+  /* ---------- Number previews ---------- */
+  var pop = document.createElement('div');
+  pop.className = 'numpop'; pop.id = 'numpop'; pop.hidden = true;
+  document.body.appendChild(pop);
+  var popTimer = null, popFor = null;
+  function showPop(el) {
+    clearTimeout(popTimer);
+    var d = el.dataset.src.split('|');
+    pop.innerHTML = '<b></b><code></code><a href="#trace">Open trace</a>';
+    pop.children[0].textContent = el.textContent + ' · ' + d[0];
+    pop.children[1].textContent = d[1];
+    pop.hidden = false; popFor = el; el.setAttribute('aria-describedby', 'numpop');
+    var r = el.getBoundingClientRect();
+    pop.style.left = Math.max(8, Math.min(window.scrollX + r.left, window.scrollX + document.documentElement.clientWidth - 248)) + 'px';
+    pop.style.top = (window.scrollY + r.bottom + 6) + 'px';
+  }
+  function hidePop(now) {
+    clearTimeout(popTimer);
+    popTimer = setTimeout(function () { pop.hidden = true; if (popFor) popFor.removeAttribute('aria-describedby'); popFor = null; }, now ? 0 : 200);
+  }
+  ['mouseover', 'focusin'].forEach(function (ev) {
+    document.addEventListener(ev, function (e) {
+      var n = e.target.closest && e.target.closest('.num[data-src]');
+      if (n) showPop(n); else if (e.target.closest && e.target.closest('#numpop')) clearTimeout(popTimer);
+    });
+  });
+  ['mouseout', 'focusout'].forEach(function (ev) {
+    document.addEventListener(ev, function (e) {
+      if (e.target.closest && e.target.closest('.num[data-src], #numpop')) hidePop();
+    });
+  });
+  document.addEventListener('keydown', function (e) { if (e.key === 'Escape') hidePop(true); });
+  window.addEventListener('hashchange', function () { hidePop(true); });
+
+  /* ---------- Routing ---------- */
+  var ROUTES = ['home', 'workspace', 'trace', 'phone'];
+  function route() {
+    var r = (location.hash || '#home').slice(1);
+    var name = ROUTES.indexOf(r) >= 0 ? r : 'home';
+    $('#app').hidden = name === 'phone';
+    $('#view-phone').hidden = name !== 'phone';
+    ['home', 'workspace', 'trace'].forEach(function (v) { $('#view-' + v).hidden = v !== name; });
+    $$('.screens a').forEach(function (a) { a.setAttribute('aria-current', a.getAttribute('href') === '#' + name ? 'page' : 'false'); });
+    $$('[data-nav]').forEach(function (a) { a.setAttribute('aria-current', a.dataset.nav === name ? 'page' : 'false'); });
+    if (name === 'workspace' && (pendingQ || !hasRun)) { var q = pendingQ; pendingQ = null; startRun(q); }
+    window.scrollTo(0, 0);
+  }
+  window.addEventListener('hashchange', route);
+  /* ---------- Keyboard shortcuts ---------- */
+  document.addEventListener('keydown', function (e) {
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
+      var s = $('#search');
+      if (s && s.offsetParent !== null) { e.preventDefault(); s.focus(); s.select(); }
+    } else if (e.key === 'Escape' && !$('#view-trace').hidden && !e.defaultPrevented) {
+      location.hash = '#workspace';
+    }
+  });
+  $('#scen').addEventListener('keydown', function (e) {
+    var d = { ArrowRight: 1, ArrowDown: 1, ArrowLeft: -1, ArrowUp: -1 }[e.key];
+    if (!d) return;
+    var bs = $$('#scen button'), i = bs.indexOf(document.activeElement);
+    if (i < 0) return;
+    e.preventDefault();
+    var n = bs[(i + d + bs.length) % bs.length];
+    n.focus(); n.click();
+  });
+  route();
+})();
+(function(){
+  var M={
+    private:['Private mode on','Client data never leaves this machine.','All models run on this device. Nothing leaves this machine.','On-device'],
+    cloud:['Private cloud on','Frontier models run in Northbridge Bio’s own cloud account.','Frontier models run in your own cloud account. Files stay encrypted there.','Your cloud'],
+    api:['Direct API on','Only prompts are sent out; zero retention.','Prompts go to the model provider under zero retention. Files stay here.','Zero retention']
+  };
+  var btns=document.querySelectorAll('.mode-seg button');
+  function pick(b){
+    var m=M[b.dataset.mode];
+    btns.forEach(function(x){x.setAttribute('aria-checked',x===b?'true':'false');x.tabIndex=x===b?0:-1});
+    document.getElementById('dev-mode').textContent=m[0];
+    document.getElementById('dev-note').textContent=m[1];
+    document.getElementById('mode-note').textContent=m[2];
+    document.querySelectorAll('.on-device').forEach(function(e){e.lastChild.textContent=m[3]});
+  }
+  btns.forEach(function(b,i){
+    b.tabIndex=i?-1:0;
+    b.addEventListener('click',function(){pick(b)});
+    b.addEventListener('keydown',function(e){
+      var d=e.key==='ArrowRight'||e.key==='ArrowDown'?1:e.key==='ArrowLeft'||e.key==='ArrowUp'?-1:0;
+      if(!d)return;
+      e.preventDefault();
+      var n=btns[(i+d+btns.length)%btns.length];
+      n.focus();pick(n);
+    });
+  });
+})();
+(function(){
+  var dr=document.getElementById('analog-drawer'),sc=document.getElementById('analog-scrim'),last=null;
+  function close(){if(dr.hidden)return;dr.hidden=sc.hidden=true;if(last)last.focus();}
+  document.addEventListener('click',function(e){
+    var b=e.target.closest&&e.target.closest('[data-open-analogs]');
+    if(b){last=b;dr.hidden=sc.hidden=false;document.getElementById('analog-close').focus();}
+  });
+  sc.addEventListener('click',close);
+  document.getElementById('analog-close').addEventListener('click',close);
+  document.addEventListener('keydown',function(e){if(e.key==='Escape')close();});
+})();
+(function(){
+  var b=document.getElementById('panel-toggle'),p=document.getElementById('model-panel');
+  if(!b||!p)return;
+  b.addEventListener('click',function(){
+    var o=p.classList.toggle('open');
+    b.setAttribute('aria-expanded',o);
+    document.getElementById('panel-toggle-label').textContent=o?'Hide model':'View model';
+  });
+})();
+</script>
+</body>
+</html>

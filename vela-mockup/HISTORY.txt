@@ -1,0 +1,13 @@
+2244dad Iteration 12: Ctrl K hint in the search field
+0a07408 Iteration 11: Keyboard shortcuts
+980657f Iteration 10: Failed Data step with "Retry this step"
+6407df1 Iteration 9: Composer attachments in the workspace
+627d5e2 Iteration 8: Fix phone model panel not collapsing
+f7496f1 Iteration 7: Collapse the model panel behind "View model" on phones
+66c6a9e Iteration 6: Add analog drawer from "See the 5 analogs"
+164dced Iteration 5: Add "What changed" note and dotted-to-solid line transition
+a13ea28 Iteration 4: Replace Private mode chip with a 3-way data-mode switch
+bb2b323 Iteration 3: Add source popovers on underlined numbers
+fc9d814 Iteration 2: Stream the final answer block by block
+6e2ab8a Iteration 1: Add 5-segment progress strip to the run card
+9222659 Seed mockup
