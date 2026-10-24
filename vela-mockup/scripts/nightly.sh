@@ -28,7 +28,8 @@ fi
 
 npm run shot >/dev/null 2>&1 || echo "Warning: the checks already fail on the starting point; every iteration will be reverted until that is fixed." >&2
 
-./scripts/loop.sh
+# Scheduled runs are bounded by ITERATIONS and the budget caps, not by wall-clock time (the host clock is UTC).
+STOP_AT="${STOP_AT:-23:59}" ./scripts/loop.sh
 status=$?
 
 branch="$(git branch --show-current)"
