@@ -76,6 +76,16 @@ This is iteration $i of up to $ITERATIONS." \
   # Put back anything the loop depends on, in case it was touched.
   for p in "${PROTECTED[@]}"; do git checkout "$BASE" -- "$p" 2>/dev/null; done
 
+  # Independent gate: the script, not the agent, decides whether the result is acceptable.
+  gate=0
+  if ! npm run shot > "logs/gate-$i.txt" 2>&1; then
+    gate=1
+    git checkout HEAD -- mockup BACKLOG.md LOG.md
+    why="$(grep -E '^\[(desktop|phone)\]' "logs/gate-$i.txt" | head -n3 | cut -c1-160 | paste -sd';' -)"
+    printf '\n## Iteration %s: REJECTED by the checks, changes reverted\n%s\nFix this class of problem before adding features.\n' "$i" "${why:-npm run shot failed}" >> LOG.md
+    say "Iteration $i failed the checks and was reverted: ${why:-npm run shot failed}"
+  fi
+
   git add -A mockup BACKLOG.md LOG.md
   if git diff --cached --quiet; then
     say "Iteration $i made no changes (exit $code, about \$$cost)."
@@ -85,7 +95,7 @@ This is iteration $i of up to $ITERATIONS." \
     say "Iteration $i committed: ${summary:-no summary} (exit $code, about \$$cost, night total about \$$spent)"
   fi
 
-  if [ "$code" -ne 0 ]; then fails=$((fails + 1)); else fails=0; fi
+  if [ "$code" -ne 0 ] || [ "$gate" -ne 0 ]; then fails=$((fails + 1)); else fails=0; fi
   if [ "$fails" -ge 2 ]; then say "Two iterations in a row ended with an error. Stopping; see $LOG."; break; fi
   sleep 10
 done

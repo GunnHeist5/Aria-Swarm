@@ -7,4 +7,6 @@ You are running ONE iteration of an unattended overnight loop that improves the 
 5. **Update `BACKLOG.md`.** Move the item you finished to "Done" as one line. Add at most two new ideas you noticed to "Later", one line each, saying why it helps the user. If "Now" is empty, promote the best item from "Later" first.
 6. **Append to `LOG.md`** an entry that starts with a heading line in exactly this form: `## Iteration N: <one-line summary of the change>` (N is the iteration number given below). Under it, write two or three short lines: what you changed, how you checked it, and anything the human should look at in the morning.
 
+Tools: edit files only with the Edit and Write tools. The only shell command allowed is `npm run shot`; python, sed, cat and similar are denied, and a denial of those never affects `npm run shot`, so always rerun it after your change. It exits with an error and prints `Problems found` if a check fails (JavaScript errors, sideways scroll, touch targets under 44px, or a broken drawer, popover, mode switch, shortcut, attach/retry flow): fix every problem before finishing. After the loop ends your iteration, the same checks run again and a failing result is reverted.
+
 Do only one item. Do not refactor unrelated code, do not rename things for style, and do not edit CLAUDE.md, prompt.md, package.json, .gitignore or scripts/.
