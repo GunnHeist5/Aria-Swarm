@@ -11,7 +11,7 @@ cd "$(dirname "$0")/.." || exit 1
 # If Playwright's browser download is blocked (sandboxed hosts), reuse a preinstalled Chromium
 # by linking it under the revision this Playwright version expects.
 if ! node -e 'process.exit(require("fs").existsSync(require("playwright").chromium.executablePath())?0:1)' 2>/dev/null; then
-  if [ -z "${PLAYWRIGHT_BROWSERS_PATH:-}" ] && ls -d /opt/pw-browsers/chromium-* >/dev/null 2>&1; then
+  if ls -d /opt/pw-browsers/chromium-* >/dev/null 2>&1; then
     shim="${TMPDIR:-/tmp}/pw-shim"
     mkdir -p "$shim"
     rev="$(node -e 'const b=require("./node_modules/playwright-core/browsers.json").browsers;const r=n=>b.find(x=>x.name===n).revision;console.log(r("chromium")+" "+r("chromium-headless-shell"))')"
