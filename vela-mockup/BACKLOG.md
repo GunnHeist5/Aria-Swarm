@@ -3,6 +3,7 @@
 The loop takes the top unchecked item in "Now" each iteration. Reorder freely before you run it.
 
 ## Now
+- [ ] Phone layout (390px): the sidebar fills the whole first screen before any workspace content. Collapse it on phones (a compact top bar with a menu button, engagement name and data-mode shown) so the workspace starts at the top. Also check the run card header ("5 agents · all on this device") is not clipped at the card's top edge.
 
 ## Later
 - [ ] Hide the "Ctrl K" hint on touch devices (no keyboard on a phone) with a `(hover:none)` media query.
