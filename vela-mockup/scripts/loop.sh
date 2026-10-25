@@ -57,6 +57,7 @@ for i in $(seq 1 "$ITERATIONS"); do
 
   say "Iteration $i starting"
   out="logs/iter-$i.json"
+  cp LOG.md "logs/LOG.before-$i.md"
   claude -p "$(cat prompt.md)
 
 This is iteration $i of up to $ITERATIONS." \
@@ -75,6 +76,15 @@ This is iteration $i of up to $ITERATIONS." \
 
   # Put back anything the loop depends on, in case it was touched.
   for p in "${PROTECTED[@]}"; do git checkout "$BASE" -- "$p" 2>/dev/null; done
+
+  # LOG.md is append-only. If the agent rewrote it, keep the old log and re-append only its new entry.
+  before="logs/LOG.before-$i.md"
+  if ! cmp -s <(head -c "$(wc -c < "$before")" LOG.md) "$before"; then
+    entry="$(awk '/^## Iteration/{buf=""} {buf=buf $0 "\n"} END{printf "%s", buf}' LOG.md)"
+    cp "$before" LOG.md
+    case "$entry" in "## Iteration"*) printf '\n%s\n' "$entry" >> LOG.md ;; esac
+    say "Iteration $i rewrote LOG.md; restored the earlier entries."
+  fi
 
   # Independent gate: the script, not the agent, decides whether the result is acceptable.
   gate=0
