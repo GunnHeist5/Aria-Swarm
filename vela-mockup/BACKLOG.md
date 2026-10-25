@@ -3,10 +3,9 @@
 The loop takes the top unchecked item in "Now" each iteration. Reorder freely before you run it.
 
 ## Now
-- [ ] Hide the "Ctrl K" hint on touch devices (no keyboard on a phone) with a `(hover:none)` media query.
+- [ ] Close the phone menu automatically when an engagement is picked, so the user lands on the content, not the open menu.
 
 ## Later
-- [ ] Close the phone menu automatically when an engagement is picked, so the user lands on the content, not the open menu.
 - [ ] "Continue without this file" button next to Retry on the failed step, so a locked file never blocks the forecast.
 - [ ] Add a shot step that opens the analog drawer, so the loop can verify it (scripts/ is off limits, so a human must add it).
 - [ ] Start the dotted preliminary line from the deck-case values so the move to solid shows the actual correction, not just a style change.
@@ -18,6 +17,7 @@ The loop takes the top unchecked item in "Now" each iteration. Reorder freely be
 - [ ] Phone: tapping "Switch to 11%" shows a confirmation and updates the pulse card.
 
 ## Done
+- [x] "Ctrl K" hint hidden on touch devices via `@media (hover:none)` (shot run shows no errors; the shot browser likely does not emulate touch, so the hint still shows there).
 - [x] Phone top bar: sidebar collapses at ≤720px to logo, Menu button (aria-expanded), engagement name and live data mode; Ctrl+K opens it (verified by screenshot at 390px).
 - [x] "Ctrl K" hint in the sidebar search field (hidden on focus); placeholder shortened to "Search" so they do not collide (verified by screenshot at both widths).
 - [x] Keyboard: Ctrl/Cmd+K focuses engagement search, Esc leaves the trace view, arrow keys move and select between scenario buttons (UNVERIFIED by screenshot: Bash denied in iteration 11 after the pre-change shots showed no errors).

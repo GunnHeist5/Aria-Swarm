@@ -69,3 +69,7 @@ Look at: the hint also shows on phones, where there is no keyboard (queued in La
 At ≤720px the sidebar now shows only the logo, a Menu button (aria-expanded, toggles to Close) and a summary line with engagement name and live data mode; desktop is unchanged. Ctrl+K opens the menu first so search still focuses.
 Verified with `npm run shot`: no errors; the first run flagged Ctrl+K, which I fixed, then it passed. Home and workspace at 390px now start at the top.
 Look at: the open-menu state is not captured by the shot script; the menu does not auto-close after picking an engagement (queued in Later).
+
+## Iteration 2: Hide the Ctrl K hint on touch devices
+Added `@media (hover:none){.kbd-hint{display:none}}` after the focus rule in mockup/index.html.
+`npm run shot` before and after: no errors. The shot browser probably does not emulate touch, so the 390px PNGs still show the hint; check on a real phone.

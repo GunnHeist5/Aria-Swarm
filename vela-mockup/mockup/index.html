@@ -79,6 +79,7 @@ button{cursor:pointer}
 .search input{width:100%;height:var(--tap);padding:0 12px 0 36px;border:1px solid var(--line-2);border-radius:var(--r);background:var(--surface);font-size:13.5px}
 .kbd-hint{position:absolute;right:10px;top:12px;padding:0 6px;border:1px solid var(--line-2);border-radius:var(--r-sm);font:11.5px/18px 'IBM Plex Mono',monospace;color:var(--muted);pointer-events:none}
 .search:focus-within .kbd-hint{display:none}
+@media (hover:none){.kbd-hint{display:none}}
 .nav-group{display:flex;flex-direction:column;gap:2px}
 .nav-group .label{padding:0 10px 6px}
 .nav-item{display:flex;align-items:center;justify-content:space-between;gap:8px;width:100%;min-height:var(--tap);padding:0 10px;border:0;border-radius:var(--r-sm);background:transparent;text-align:left;font-size:13.5px;color:var(--ink-2);text-decoration:none}
