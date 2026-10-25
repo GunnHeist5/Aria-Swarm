@@ -1243,10 +1243,14 @@ pre.code .c{color:var(--code-muted)}
 })();
 (function(){
   var b=document.getElementById('menu-btn'),s=document.getElementById('app-sidebar');
-  b.addEventListener('click',function(){
-    var o=s.classList.toggle('open');
+  function set(o){
+    s.classList.toggle('open',o);
     b.setAttribute('aria-expanded',o);
     document.getElementById('menu-btn-label').textContent=o?'Close':'Menu';
+  }
+  b.addEventListener('click',function(){set(!s.classList.contains('open'));});
+  s.addEventListener('click',function(e){
+    if(s.classList.contains('open')&&e.target.closest('.nav-item,.btn-primary'))set(false);
   });
 })();
 (function(){

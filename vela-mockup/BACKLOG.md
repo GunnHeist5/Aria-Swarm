@@ -3,7 +3,7 @@
 The loop takes the top unchecked item in "Now" each iteration. Reorder freely before you run it.
 
 ## Now
-- [ ] Close the phone menu automatically when an engagement is picked, so the user lands on the content, not the open menu.
+- [ ] Promote from Later: "Continue without this file" button next to Retry on the failed step.
 
 ## Later
 - [ ] "Continue without this file" button next to Retry on the failed step, so a locked file never blocks the forecast.
@@ -17,6 +17,7 @@ The loop takes the top unchecked item in "Now" each iteration. Reorder freely be
 - [ ] Phone: tapping "Switch to 11%" shows a confirmation and updates the pulse card.
 
 ## Done
+- [x] Phone menu closes automatically when an engagement or "New analysis" is picked (shot run passes with no errors; the open-menu state is not captured by shots).
 - [x] "Ctrl K" hint hidden on touch devices via `@media (hover:none)` (shot run shows no errors; the shot browser likely does not emulate touch, so the hint still shows there).
 - [x] Phone top bar: sidebar collapses at ≤720px to logo, Menu button (aria-expanded), engagement name and live data mode; Ctrl+K opens it (verified by screenshot at 390px).
 - [x] "Ctrl K" hint in the sidebar search field (hidden on focus); placeholder shortened to "Search" so they do not collide (verified by screenshot at both widths).

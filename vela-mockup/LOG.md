@@ -73,3 +73,8 @@ Look at: the open-menu state is not captured by the shot script; the menu does n
 ## Iteration 2: Hide the Ctrl K hint on touch devices
 Added `@media (hover:none){.kbd-hint{display:none}}` after the focus rule in mockup/index.html.
 `npm run shot` before and after: no errors. The shot browser probably does not emulate touch, so the 390px PNGs still show the hint; check on a real phone.
+
+## Iteration 3: Close the phone menu after picking an engagement
+Menu toggle now goes through one `set(open)` helper; a click on a `.nav-item` or "New analysis" inside the open sidebar closes it and resets the label and aria-expanded.
+`npm run shot` before and after: no errors. Shots do not capture the open menu, so the close itself is unverified visually.
+Look at: tap an engagement at 390px and confirm you land on the content.
