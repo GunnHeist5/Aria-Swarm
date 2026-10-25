@@ -64,3 +64,8 @@ Please run `npm run shot`, then try Ctrl+K on Home/Workspace, Esc on #trace, and
 Added a mono "Ctrl K" key hint inside the sidebar search (hidden while focused); shortened the placeholder to "Search" after the first shot showed the hint overlapping the longer text.
 Verified with `npm run shot`: no JS errors, hint fits at 1440px and 390px. Bash was denied afterwards, so the backlog and log were updated with Edit only.
 Look at: the hint also shows on phones, where there is no keyboard (queued in Later).
+
+## Iteration 1: Collapse the sidebar into a phone top bar
+At ≤720px the sidebar now shows only the logo, a Menu button (aria-expanded, toggles to Close) and a summary line with engagement name and live data mode; desktop is unchanged. Ctrl+K opens the menu first so search still focuses.
+Verified with `npm run shot`: no errors; the first run flagged Ctrl+K, which I fixed, then it passed. Home and workspace at 390px now start at the top.
+Look at: the open-menu state is not captured by the shot script; the menu does not auto-close after picking an engagement (queued in Later).

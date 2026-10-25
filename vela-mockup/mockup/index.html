@@ -95,6 +95,18 @@ button{cursor:pointer}
 .meter{height:6px;border-radius:3px;background:var(--line);overflow:hidden}
 .meter span{display:block;height:6px;width:76%;background:var(--accent)}
 @media (max-width:720px){ .sidebar .hide-sm{display:none} }
+.side-top{display:flex;align-items:center;justify-content:space-between;gap:8px}
+.menu-btn,.side-sum{display:none}
+.side-sum b{font-size:14px;font-weight:600}
+.side-sum span{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--accent-ink);font-weight:500}
+@media (max-width:720px){
+  .sidebar{padding:8px 16px;gap:4px;flex-basis:auto}
+  .sidebar.open{padding-bottom:20px;gap:22px}
+  .menu-btn{display:inline-flex}
+  .side-sum{display:flex;flex-direction:column;gap:2px;padding:0 6px 8px}
+  .sidebar.open .side-sum{display:none}
+  .sidebar:not(.open)>*:not(.side-top):not(.side-sum){display:none!important}
+}
 
 /* ===== Workspace ===== */
 .ws{display:flex;flex-wrap:wrap;flex:1}
@@ -363,11 +375,15 @@ pre.code .c{color:var(--code-muted)}
 <div class="app" id="app">
 
   <!-- ===== Sidebar ===== -->
-  <div class="sidebar">
-    <div class="brand">
-      <svg class="mark" width="22" height="22" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2.5 20 19H4z" fill="#0B6E6E"/><path d="M3 21.5h18" fill="none" stroke="#0F172A" stroke-width="2" stroke-linecap="round"/></svg>
-      Vela
+  <div class="sidebar" id="app-sidebar">
+    <div class="side-top">
+      <div class="brand">
+        <svg class="mark" width="22" height="22" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2.5 20 19H4z" fill="#0B6E6E"/><path d="M3 21.5h18" fill="none" stroke="#0F172A" stroke-width="2" stroke-linecap="round"/></svg>
+        Vela
+      </div>
+      <button type="button" class="btn menu-btn" id="menu-btn" aria-expanded="false" aria-controls="app-sidebar"><span id="menu-btn-label">Menu</span></button>
     </div>
+    <div class="side-sum" aria-live="polite"><b>NB-201 · US launch forecast</b><span><svg class="i"><use href="#i-lock"/></svg><span id="sum-mode">Private mode on</span> · RTX Spark</span></div>
     <button type="button" class="ws-switch">
       <span><b>Northbridge Bio</b><small>Client workspace · isolated</small></span>
       <svg class="i"><use href="#i-down"/></svg>
@@ -1167,7 +1183,8 @@ pre.code .c{color:var(--code-muted)}
   /* ---------- Keyboard shortcuts ---------- */
   document.addEventListener('keydown', function (e) {
     if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
-      var s = $('#search');
+      var s = $('#search'), mb = $('#menu-btn');
+      if (mb && mb.offsetParent !== null && mb.getAttribute('aria-expanded') !== 'true') mb.click();
       if (s && s.offsetParent !== null) { e.preventDefault(); s.focus(); s.select(); }
     } else if (e.key === 'Escape' && !$('#view-trace').hidden && !e.defaultPrevented) {
       location.hash = '#workspace';
@@ -1195,6 +1212,7 @@ pre.code .c{color:var(--code-muted)}
     var m=M[b.dataset.mode];
     btns.forEach(function(x){x.setAttribute('aria-checked',x===b?'true':'false');x.tabIndex=x===b?0:-1});
     document.getElementById('dev-mode').textContent=m[0];
+    document.getElementById('sum-mode').textContent=m[0];
     document.getElementById('dev-note').textContent=m[1];
     document.getElementById('mode-note').textContent=m[2];
     document.querySelectorAll('.on-device').forEach(function(e){e.lastChild.textContent=m[3]});
@@ -1221,6 +1239,14 @@ pre.code .c{color:var(--code-muted)}
   sc.addEventListener('click',close);
   document.getElementById('analog-close').addEventListener('click',close);
   document.addEventListener('keydown',function(e){if(e.key==='Escape')close();});
+})();
+(function(){
+  var b=document.getElementById('menu-btn'),s=document.getElementById('app-sidebar');
+  b.addEventListener('click',function(){
+    var o=s.classList.toggle('open');
+    b.setAttribute('aria-expanded',o);
+    document.getElementById('menu-btn-label').textContent=o?'Close':'Menu';
+  });
 })();
 (function(){
   var b=document.getElementById('panel-toggle'),p=document.getElementById('model-panel');
