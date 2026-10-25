@@ -3,7 +3,10 @@
 ## What this is
 A clickable UI mockup for **Vela** (working name), an AI forecasting workspace for pharma commercial and BD teams. It is a **mockup only**: one static HTML file, fictional sample data, no backend, no real AI calls. The goal is to look and feel like the real product so it can be shown to prospects and investors.
 
-Everything lives in `mockup/index.html` (HTML, CSS and JS in one file). Open it directly in a browser. Screens are hash routes: `#home`, `#workspace`, `#trace`, `#phone`.
+Everything lives in `mockup/index.html` (HTML, CSS and JS in one file). Open it directly in a browser. Screens are hash routes: `#home`, `#workspace`, `#trace`, `#phone`, and `#evidence` (once added). Opening the page with `?demo=1` hides the review-aid screen switcher.
+
+## Current phase: demo-readiness
+The mockup is feature-complete enough. Work only on the items in `BACKLOG.md` "Now", in order; do not add feature ideas to "Later". The `#evidence` screen shows data exported by the real model (`python -m vela export-evidence`) between the `EVIDENCE:START` / `EVIDENCE:END` markers in `mockup/index.html`; never edit inside those markers by hand once real data is there, and keep the JSON shape stable.
 
 ## Who it is for
 Forecasting, commercial and business-development leads at small and mid-size biotechs. They need three things from every screen: **speed** (answers in seconds), **trust** (every number has a source), and **privacy** (client data stays on the device).
@@ -24,9 +27,9 @@ Forecasting, commercial and business-development leads at small and mid-size bio
 - Spacing: multiples of 2/4px; existing gaps are 4, 6, 8, 10, 12, 14, 18, 22, 26, 28, 36px.
 
 ## Hard rules
-- **Mockup only.** No frameworks, no build step, no external JavaScript, no network calls except the Google Fonts link already present.
+- **Mockup only.** No frameworks, no build step, no external JavaScript, and no network calls of any kind: the demo must work with Wi-Fi off. Fonts are self-hosted from `mockup/fonts/` (the Google Fonts link is being removed; do not add it back).
 - **Fictional data only.** Company "Northbridge Bio", asset "NB-201", analogs "Launch A–F". Never use real drug or company names. Keep numbers internally consistent (peak = 620K × 11% × 64% × $32.6K ≈ $1.42B; deck case $2.33B).
-- **Keep everything working.** All four routes, the run animation, step expand/collapse, "Run again", composer submit, scenario buttons, tabs, critic decision buttons and links to `#trace` must keep working after your change.
+- **Keep everything working.** All routes, the run animation, step expand/collapse, "Run again", composer submit, scenario buttons, tabs, critic decision buttons and links to `#trace` must keep working after your change.
 - **Accessibility.** Real `<button>`/`<a>`/`<input>` with labels; touch targets at least 44px; text contrast at least 4.5:1; `aria-expanded` on toggles; `aria-live` for run updates; honor `prefers-reduced-motion`.
 - **Responsive.** Works at 1440px and at 390px wide with no horizontal page scroll.
 - The dark `.screens` switcher at the bottom right is a review aid, not product UI. Keep it.

@@ -28,6 +28,8 @@ fi
 
 npm run shot >/dev/null 2>&1 || echo "Warning: the checks already fail on the starting point; every iteration will be reverted until that is fixed." >&2
 
+# Demo-readiness phase: four iterations a night.
+export ITERATIONS="${ITERATIONS:-4}"
 # Scheduled runs are bounded by ITERATIONS and the budget caps, not by wall-clock time (the host clock is UTC).
 STOP_AT="${STOP_AT:-23:59}" ./scripts/loop.sh
 status=$?

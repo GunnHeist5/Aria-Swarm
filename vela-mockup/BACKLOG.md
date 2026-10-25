@@ -3,10 +3,15 @@
 The loop takes the top unchecked item in "Now" each iteration. Reorder freely before you run it.
 
 ## Now
-- [ ] Phone layout (390px): the sidebar fills the whole first screen before any workspace content. Collapse it on phones (a compact top bar with a menu button, engagement name and data-mode shown) so the workspace starts at the top. Also check the run card header ("5 agents · all on this device") is not clipped at the card's top edge.
+Demo-readiness only. Do not add feature ideas to Later; finish these, in order.
+- [ ] a) Device card: change to "RTX Spark · 64 GB", models "qwen3.6-35b-a3b · chronos-2 · timesfm-2.5", memory bar about 38 / 55 GB (the label and the bar fill must agree).
+- [ ] b) Fix the "What changed" note: it stays nearly transparent after the run finishes. It must be fully opaque and readable in the done state at 1440px and 390px.
+- [ ] c) Phone: confirm the top-bar sidebar fix works (workspace starts at the top at 390px, run card header not clipped); hide the "Ctrl K" hint below 720px.
+- [ ] d) Self-host the IBM Plex fonts so the demo works with Wi-Fi off. The woff2 files are already in `mockup/fonts/` (Sans 400/500/600, Mono 400/500, latin subset: `ibm-plex-sans-latin-<weight>-normal.woff2`, `ibm-plex-mono-latin-<weight>-normal.woff2`). Add matching `@font-face` rules (font-display: swap) and remove the Google Fonts `<link>` tags. CLAUDE.md allows the Google Fonts link only; this replaces it and is intended.
+- [ ] e) Add an `#evidence` screen that renders a JSON block embedded in `mockup/index.html` between the markers `EVIDENCE:START` and `EVIDENCE:END` (inside a `<script type="application/json" id="evidence-data">`). It shows: the model leaderboard, range coverage, launches tested, error by date, and a label that reads "Real data" or "Sample data" from a field in the JSON. Ship it with plausible sample data and the label "Sample data". Link it from the Backtest error tile.
+- [ ] f) Demo mode: opening the page with `?demo=1` hides the `.screens` switcher (all routes still reachable by their hash and in-page links).
 
 ## Later
-- [ ] Hide the "Ctrl K" hint on touch devices (no keyboard on a phone) with a `(hover:none)` media query.
 - [ ] "Continue without this file" button next to Retry on the failed step, so a locked file never blocks the forecast.
 - [ ] Add a shot step that opens the analog drawer, so the loop can verify it (scripts/ is off limits, so a human must add it).
 - [ ] Start the dotted preliminary line from the deck-case values so the move to solid shows the actual correction, not just a style change.
