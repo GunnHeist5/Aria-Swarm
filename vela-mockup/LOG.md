@@ -83,3 +83,8 @@ Look at: tap an engagement at 390px and confirm you land on the content.
 Added a second button beside "Retry this step" in the failed callout (`data-skip`, same resume handler) and reworded the copy. The shot script needs a single `[data-retry]`, so the new button uses its own attribute.
 `npm run shot` passes with no errors; phone-failed-step.png shows both buttons wrapping cleanly.
 Look at: the skip path currently resumes identically to Retry; the answer does not yet say the file was excluded (added to Later).
+
+## Iteration 5: Preliminary P50 line starts at deck values and animates to the critic-adjusted line
+The dotted early-read line now starts on the deck-case path (early read text, tile and step log say ~$2.3B) and tweens to the solid $1.42B line when the critic finishes, with the end dot following; reduced motion jumps straight there.
+`npm run shot` shows no errors; desktop running and done screenshots read correctly (the mid-animation frame is not captured).
+Look at: the running shot still shows an empty chart area while the Forecaster step is pending (added to Later).

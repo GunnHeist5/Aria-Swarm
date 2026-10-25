@@ -3,12 +3,12 @@
 The loop takes the top unchecked item in "Now" each iteration. Reorder freely before you run it.
 
 ## Now
-- [ ] Start the dotted preliminary line from the deck-case values so the move to solid shows the actual correction, not just a style change.
+- [ ] After "Continue without this file", show a "KOL notes excluded" chip on the answer so the user sees what the forecast left out.
 
 ## Later
+- [ ] Show the preliminary chart (deck-value dotted line) already in the running shot; it is blank while the step is pending, so the early read has no visual until later.
 - [ ] After "Continue without this file", show a "KOL notes excluded" chip on the answer so the user sees what the forecast left out.
 - [ ] Add a shot step that opens the analog drawer, so the loop can verify it (scripts/ is off limits, so a human must add it).
-- [ ] Start the dotted preliminary line from the deck-case values so the move to solid shows the actual correction, not just a style change.
 - [ ] Take the done shot after the answer stream finishes (the shot script captures it mid-fade), so reviewers see the full answer.
 - [ ] Give the Drivers cards the same hover preview as inline numbers, so every figure has a quick receipt.
 - [ ] Memo draft tab with a real-looking draft whose numbers link to traces.
@@ -17,6 +17,7 @@ The loop takes the top unchecked item in "Now" each iteration. Reorder freely be
 - [ ] Phone: tapping "Switch to 11%" shows a confirmation and updates the pulse card.
 
 ## Done
+- [x] Preliminary P50 line starts at the deck-case values (early read, tile and log now say ~$2.3B) and animates down to the critic-adjusted line, endpoint dot following; instant under reduced motion (verified by screenshot at desktop, no errors).
 - [x] "Continue without this file" button beside Retry on the failed step; resumes the run (verified by screenshot at 390px, no errors).
 - [x] Phone menu closes automatically when an engagement or "New analysis" is picked (shot run passes with no errors; the open-menu state is not captured by shots).
 - [x] "Ctrl K" hint hidden on touch devices via `@media (hover:none)` (shot run shows no errors; the shot browser likely does not emulate touch, so the hint still shows there).

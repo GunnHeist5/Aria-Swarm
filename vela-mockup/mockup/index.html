@@ -610,7 +610,7 @@ pre.code .c{color:var(--code-muted)}
               <polyline class="deck" points="48,180.3 122,151 196,109.3 270,66.8 344,27.8"/>
               <polyline class="bear" points="48,186.5 122,176.8 196,160.8 270,142.7 344,126.7"/>
               <polyline class="p50" points="48,183.7 122,167 196,142.7 270,116.9 344,91.2"/>
-              <circle cx="344" cy="91.2" r="3.5" fill="#0B6E6E"/>
+              <circle id="p50-dot" cx="344" cy="91.2" r="3.5" fill="#0B6E6E"/>
               <circle cx="344" cy="27.8" r="3" fill="#64748B"/>
               <text class="ax mid" x="48" y="208">2027</text>
               <text class="ax mid" x="122" y="208">2028</text>
@@ -775,7 +775,7 @@ pre.code .c{color:var(--code-muted)}
 <template id="tpl-prelim">
   <div class="prelim">
     <span class="chip chip-accent" style="align-self:flex-start"><span class="spin" style="width:12px;height:12px"></span>Checking assumptions</span>
-    <p><strong>Early read: about $1.4B peak US net sales in 2031.</strong> The critic is testing each assumption against analog launches, so this number may still move.</p>
+    <p><strong>Early read: about $2.3B peak US net sales in 2031.</strong> That matches the deck. The critic is testing each assumption against analog launches, so this number may still move.</p>
   </div>
 </template>
 
@@ -839,7 +839,7 @@ pre.code .c{color:var(--code-muted)}
     { id: 'analyst', name: 'Analyst', running: 'Building the patient funnel in code', done: 'Built the patient funnel in code', dur: 1100,
       logs: ['Wrote drivers.py (88 lines)', 'Eligible patients: 620K in claims vs. 642K in deck', 'Net price $32.6K after 38% gross-to-net'] },
     { id: 'forecaster', name: 'Forecaster', running: 'Running 3 forecast methods', done: 'Ran 3 methods; early read is ready', dur: 900,
-      logs: ['Chronos-2 on 36 monthly points: 6 ms', 'Matched 5 analog oral launches in immunology', 'Preliminary peak: about $1.4B in 2031'],
+      logs: ['Chronos-2 on 36 monthly points: 6 ms', 'Matched 5 analog oral launches in immunology', 'Preliminary peak: about $2.3B in 2031 (deck assumptions)'],
       after: function () { setAnswer('tpl-prelim'); setChart('prelim'); setTiles('prelim'); } },
     { id: 'critic', name: 'Critic', running: 'Backtesting and tracing every number', done: 'Traced all 31 numbers, flagged 1 assumption', dur: 3000, flag: true,
       logs: ['Replayed the method on 6 past launches: median error 14%', 'Traced 31 of 31 numbers to a source', 'Flag: deck peak share 18% vs. analog range 7–12%', 'Adjusted to 11% (analog median); peak is now $1.42B'],
@@ -939,7 +939,19 @@ pre.code .c{color:var(--code-muted)}
   function setChart(state) {
     $('#chart').dataset.state = state;
     $('#changed').classList.toggle('on', state === 'final');
+    var line = $('#chart .p50'), from = P50_DECK, to = P50_FINAL;
+    cancelAnimationFrame(p50Frame);
+    if (state !== 'final') { line.setAttribute('points', pts(P50_DECK)); return; }
+    if (matchMedia('(prefers-reduced-motion:reduce)').matches) { line.setAttribute('points', pts(to)); return; }
+    var t0 = performance.now();
+    (function step(now) {
+      var k = Math.min(1, (now - t0) / 800);
+      line.setAttribute('points', pts(to.map(function (y, i) { return from[i] + (y - from[i]) * k; })));
+      if (k < 1) p50Frame = requestAnimationFrame(step);
+    })(t0);
   }
+  var P50_DECK = [180.3, 151, 109.3, 66.8, 27.8], P50_FINAL = [183.7, 167, 142.7, 116.9, 91.2], p50Frame = 0;
+  function pts(ys) { $('#p50-dot').setAttribute('cy', ys[4].toFixed(1)); return ys.map(function (y, i) { return (48 + i * 74) + ',' + y.toFixed(1); }).join(' '); }
 
   function setTile(id, value, isPrelim) {
     var t = $('#' + id);
@@ -948,7 +960,7 @@ pre.code .c{color:var(--code-muted)}
   }
   function setTiles(state) {
     if (state === 'pending') { setTile('t-peak', '…'); setTile('t-vs', '…'); setTile('t-bt', '…'); }
-    if (state === 'prelim') { setTile('t-peak', '~$1.4B', true); setTile('t-vs', '…'); setTile('t-bt', '…'); }
+    if (state === 'prelim') { setTile('t-peak', '~$2.3B', true); setTile('t-vs', '…'); setTile('t-bt', '…'); }
     if (state === 'final') { setTile('t-peak', '$1.42B'); setTile('t-vs', '−39%'); setTile('t-bt', '14%'); }
   }
 
