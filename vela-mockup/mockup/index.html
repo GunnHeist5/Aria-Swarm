@@ -803,9 +803,10 @@ pre.code .c{color:var(--code-muted)}
 <template id="tpl-failed">
   <div class="callout" role="alert">
     <h3><svg class="i"><use href="#i-bang"/></svg>Data stopped on one file</h3>
-    <p>KOL_interview_notes.pdf is password-protected, so its pages could not be read. Your deck and claims extract are loaded, and no other step has run yet. Unlock the file and retry, or retry now to continue without it.</p>
+    <p>KOL_interview_notes.pdf is password-protected, so its pages could not be read. Your deck and claims extract are loaded, and no other step has run yet. Unlock the file and retry, or continue without it. The forecast will note that it was left out.</p>
     <div class="row-wrap" style="gap:8px">
       <button type="button" class="btn btn-outline-warn" data-retry>Retry this step</button>
+      <button type="button" class="btn btn-outline-warn" data-skip>Continue without this file</button>
     </div>
   </div>
 </template>
@@ -1106,7 +1107,7 @@ pre.code .c{color:var(--code-muted)}
   $('#answer').addEventListener('click', function (e) {
     var ask = e.target.closest('[data-ask]');
     if (ask) { startRun(ask.dataset.ask); return; }
-    if (e.target.closest('[data-retry]')) { startRun(null, false, true); return; }
+    if (e.target.closest('[data-retry],[data-skip]')) { startRun(null, false, true); return; }
     var dec = e.target.closest('[data-decide]');
     if (dec) {
       var row = dec.closest('[data-decision]');

@@ -3,10 +3,10 @@
 The loop takes the top unchecked item in "Now" each iteration. Reorder freely before you run it.
 
 ## Now
-- [ ] Promote from Later: "Continue without this file" button next to Retry on the failed step.
+- [ ] Start the dotted preliminary line from the deck-case values so the move to solid shows the actual correction, not just a style change.
 
 ## Later
-- [ ] "Continue without this file" button next to Retry on the failed step, so a locked file never blocks the forecast.
+- [ ] After "Continue without this file", show a "KOL notes excluded" chip on the answer so the user sees what the forecast left out.
 - [ ] Add a shot step that opens the analog drawer, so the loop can verify it (scripts/ is off limits, so a human must add it).
 - [ ] Start the dotted preliminary line from the deck-case values so the move to solid shows the actual correction, not just a style change.
 - [ ] Take the done shot after the answer stream finishes (the shot script captures it mid-fade), so reviewers see the full answer.
@@ -17,6 +17,7 @@ The loop takes the top unchecked item in "Now" each iteration. Reorder freely be
 - [ ] Phone: tapping "Switch to 11%" shows a confirmation and updates the pulse card.
 
 ## Done
+- [x] "Continue without this file" button beside Retry on the failed step; resumes the run (verified by screenshot at 390px, no errors).
 - [x] Phone menu closes automatically when an engagement or "New analysis" is picked (shot run passes with no errors; the open-menu state is not captured by shots).
 - [x] "Ctrl K" hint hidden on touch devices via `@media (hover:none)` (shot run shows no errors; the shot browser likely does not emulate touch, so the hint still shows there).
 - [x] Phone top bar: sidebar collapses at ≤720px to logo, Menu button (aria-expanded), engagement name and live data mode; Ctrl+K opens it (verified by screenshot at 390px).

@@ -78,3 +78,8 @@ Added `@media (hover:none){.kbd-hint{display:none}}` after the focus rule in moc
 Menu toggle now goes through one `set(open)` helper; a click on a `.nav-item` or "New analysis" inside the open sidebar closes it and resets the label and aria-expanded.
 `npm run shot` before and after: no errors. Shots do not capture the open menu, so the close itself is unverified visually.
 Look at: tap an engagement at 390px and confirm you land on the content.
+
+## Iteration 4: Add "Continue without this file" to the failed Data step
+Added a second button beside "Retry this step" in the failed callout (`data-skip`, same resume handler) and reworded the copy. The shot script needs a single `[data-retry]`, so the new button uses its own attribute.
+`npm run shot` passes with no errors; phone-failed-step.png shows both buttons wrapping cleanly.
+Look at: the skip path currently resumes identically to Retry; the answer does not yet say the file was excluded (added to Later).
